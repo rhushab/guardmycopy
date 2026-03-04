@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/rhushabhbontapalle/clipguard/internal/app"
+	"github.com/rhushabhbontapalle/clipguard/internal/auditlog"
 	"github.com/rhushabhbontapalle/clipguard/internal/config"
 	"github.com/rhushabhbontapalle/clipguard/internal/userstate"
 )
@@ -176,5 +178,137 @@ func TestRunAllowOnceWithIOPersistsState(t *testing.T) {
 	}
 	if !state.AllowOnce {
 		t.Fatal("expected allow_once to be true")
+	}
+}
+
+func TestRunLogWithIOTailsEntries(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	store, err := auditlog.New(logPath)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	base := time.Unix(1_700_000_000, 0).UTC()
+	for i := 0; i < 3; i++ {
+		if err := store.Log(auditlog.Entry{
+			Timestamp:    base.Add(time.Duration(i) * time.Second),
+			App:          "Terminal",
+			Score:        i + 1,
+			RiskLevel:    "med",
+			FindingTypes: []string{"jwt"},
+			Action:       "sanitize",
+			ContentHash:  "abc123",
+		}); err != nil {
+			t.Fatalf("Log returned error: %v", err)
+		}
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runLogWithIO([]string{"--tail", "2"}, &stdout, &stderr, logPath)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	}
+
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d (%q)", len(lines), stdout.String())
+	}
+	if !strings.Contains(lines[0], `"score":2`) {
+		t.Fatalf("expected first tailed score to be 2, got %q", lines[0])
+	}
+	if !strings.Contains(lines[1], `"score":3`) {
+		t.Fatalf("expected second tailed score to be 3, got %q", lines[1])
+	}
+}
+
+func TestRunLogWithIORejectsInvalidTail(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runLogWithIO([]string{"--tail", "0"}, &stdout, &stderr, filepath.Join(t.TempDir(), "audit.jsonl"))
+	if code != 2 {
+		t.Fatalf("expected exit code 2, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "--tail must be > 0") {
+		t.Fatalf("expected invalid tail message, got %q", stderr.String())
+	}
+}
+
+func TestRunConfigInitWithIOWritesDefaultConfig(t *testing.T) {
+	defaultPath := filepath.Join(t.TempDir(), "clipguard", "config.yaml")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runConfigInitWithIO(nil, &stdout, &stderr, defaultPath)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), defaultPath) {
+		t.Fatalf("expected output to include written path, got %q", stdout.String())
+	}
+
+	data, err := os.ReadFile(defaultPath)
+	if err != nil {
+		t.Fatalf("read default config: %v", err)
+	}
+	if string(data) != config.DefaultTemplate() {
+		t.Fatal("written config did not match default template")
+	}
+}
+
+func TestRunConfigInitWithIORejectsPositionalArgs(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runConfigInitWithIO([]string{"extra"}, &stdout, &stderr, filepath.Join(t.TempDir(), "config.yaml"))
+	if code != 2 {
+		t.Fatalf("expected exit code 2, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "does not accept positional arguments") {
+		t.Fatalf("expected positional argument error, got %q", stderr.String())
+	}
+}
+
+func TestRunConfigInitWithIOExistingFileRequiresForce(t *testing.T) {
+	defaultPath := filepath.Join(t.TempDir(), "clipguard", "config.yaml")
+	if _, err := config.WriteDefault(defaultPath, false); err != nil {
+		t.Fatalf("WriteDefault returned error: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runConfigInitWithIO(nil, &stdout, &stderr, defaultPath)
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "already exists") {
+		t.Fatalf("expected already exists message, got %q", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runConfigInitWithIO([]string{"--force"}, &stdout, &stderr, defaultPath)
+	if code != 0 {
+		t.Fatalf("expected exit code 0 with --force, got %d (stderr=%q)", code, stderr.String())
+	}
+}
+
+func TestRunHelpConfigInit(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runHelp([]string{"config", "init"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "clipguard config init") {
+		t.Fatalf("expected config init usage in stdout, got %q", stdout.String())
 	}
 }

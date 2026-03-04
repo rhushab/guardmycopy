@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rhushabhbontapalle/clipguard/internal/auditlog"
 	"github.com/rhushabhbontapalle/clipguard/internal/config"
 	"github.com/rhushabhbontapalle/clipguard/internal/core"
 	"github.com/rhushabhbontapalle/clipguard/internal/userstate"
@@ -69,6 +70,19 @@ func (m *mockRuntimeStateStore) Save(state userstate.State) error {
 	}
 	m.state = state
 	m.saveCalls++
+	return nil
+}
+
+type mockAuditLogStore struct {
+	logErr  error
+	entries []auditlog.Entry
+}
+
+func (m *mockAuditLogStore) Log(entry auditlog.Entry) error {
+	if m.logErr != nil {
+		return m.logErr
+	}
+	m.entries = append(m.entries, entry)
 	return nil
 }
 
@@ -376,5 +390,59 @@ func TestRunRespectsAllowOnceState(t *testing.T) {
 	}
 	if stateStore.state.AllowOnce {
 		t.Fatal("expected allow_once to be consumed during run")
+	}
+}
+
+func TestScanCurrentDetailedWritesAuditEntry(t *testing.T) {
+	clip := &mockClipboard{value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"}
+	svc := New(config.Defaults(), clip)
+
+	fixedTime := time.Unix(1_700_000_000, 0).UTC()
+	svc.timeNow = func() time.Time { return fixedTime }
+
+	auditStore := &mockAuditLogStore{}
+	svc.SetAuditLogStore(auditStore)
+
+	decision, _, err := svc.ScanCurrentDetailed()
+	if err != nil {
+		t.Fatalf("ScanCurrentDetailed returned error: %v", err)
+	}
+	if len(auditStore.entries) != 1 {
+		t.Fatalf("expected 1 audit entry, got %d", len(auditStore.entries))
+	}
+
+	entry := auditStore.entries[0]
+	if !entry.Timestamp.Equal(fixedTime) {
+		t.Fatalf("unexpected timestamp: got %s want %s", entry.Timestamp, fixedTime)
+	}
+	if entry.App != decision.ActiveAppName {
+		t.Fatalf("unexpected app: got %q want %q", entry.App, decision.ActiveAppName)
+	}
+	if entry.Score != 15 {
+		t.Fatalf("unexpected score: got %d want 15", entry.Score)
+	}
+	if entry.RiskLevel != string(core.RiskLevelHigh) {
+		t.Fatalf("unexpected risk level: %q", entry.RiskLevel)
+	}
+	if entry.Action != string(config.ActionSanitize) {
+		t.Fatalf("unexpected action: %q", entry.Action)
+	}
+	if len(entry.FindingTypes) != 1 || entry.FindingTypes[0] != core.FindingTypePEMPrivateKey {
+		t.Fatalf("unexpected finding types: %#v", entry.FindingTypes)
+	}
+
+	expectedHash := hashToHex(hashText(clip.value))
+	if entry.ContentHash != expectedHash {
+		t.Fatalf("unexpected content hash: got %q want %q", entry.ContentHash, expectedHash)
+	}
+}
+
+func TestScanCurrentDetailedIgnoresAuditWriteErrors(t *testing.T) {
+	clip := &mockClipboard{value: "hello"}
+	svc := New(config.Defaults(), clip)
+	svc.SetAuditLogStore(&mockAuditLogStore{logErr: errors.New("disk full")})
+
+	if _, _, err := svc.ScanCurrentDetailed(); err != nil {
+		t.Fatalf("ScanCurrentDetailed should ignore audit log errors, got %v", err)
 	}
 }

@@ -12,6 +12,15 @@ Current detectors:
 - Env-style secrets (`KEY=VALUE` for secret-like key names)
 - High-entropy long tokens
 
+## Privacy
+
+- By default, clipguard does not persist clipboard scan history.
+- Optional audit logging is available and is disabled by default.
+- Enable audit logging with `--audit-log` on `once` or `run`.
+- Audit entries are JSONL lines in `$(os.UserConfigDir)/clipguard/audit.jsonl`.
+- Each entry stores: `timestamp`, `app`, `score`, `riskLevel`, `findingTypes`, `action`, and `contentHash` (SHA-256 of clipboard text).
+- Raw clipboard text is never written to the audit log.
+
 ## macOS permissions
 
 `clipguard` asks macOS `System Events` for the frontmost app name. On some systems this requires enabling Accessibility access for the terminal/app running `clipguard`:
@@ -28,6 +37,21 @@ Or via Makefile:
 
 ```bash
 make build
+```
+
+## Install (macOS)
+
+Build and place the binary in your path:
+
+```bash
+go build -o ./clipguard ./cmd/clipguard
+install -m 0755 ./clipguard /usr/local/bin/clipguard
+```
+
+Write a default config file under your user config directory:
+
+```bash
+clipguard config init
 ```
 
 ## Run
@@ -86,6 +110,18 @@ Run polling mode with reasoning logs:
 ./clipguard run --verbose
 ```
 
+Run with optional audit log enabled:
+
+```bash
+./clipguard run --audit-log
+```
+
+Scan once with optional audit log enabled:
+
+```bash
+./clipguard once --audit-log
+```
+
 Temporarily disable enforcement:
 
 ```bash
@@ -104,13 +140,29 @@ Print version:
 ./clipguard --version
 ```
 
+Write default config file:
+
+```bash
+./clipguard config init
+```
+
+Tail the latest 50 audit entries:
+
+```bash
+./clipguard log --tail 50
+```
+
 Config is optional. When `--config` is omitted, clipguard uses built-in defaults and then attempts:
 
-`~/.config/clipguard/config.yaml`
+`$(os.UserConfigDir)/clipguard/config.yaml`
 
 Runtime user controls (`snooze` / `allow-once`) are stored in:
 
 `$(os.UserConfigDir)/clipguard/state.json`
+
+Optional audit log entries are stored in:
+
+`$(os.UserConfigDir)/clipguard/audit.jsonl`
 
 YAML schema:
 
@@ -152,6 +204,35 @@ Allowlist behavior:
 - Matched finding spans are also skipped when they match allowlist regexes.
 
 Use [`configs/example.yaml`](configs/example.yaml) as a starting point.
+
+## Autostart (macOS LaunchAgent)
+
+`clipguard` does not auto-install a LaunchAgent. Use the template at `scripts/macos/clipguard.plist` and install it manually:
+
+1. Copy template into LaunchAgents:
+
+```bash
+cp ./scripts/macos/clipguard.plist ~/Library/LaunchAgents/com.clipguard.agent.plist
+```
+
+2. Edit placeholders in `~/Library/LaunchAgents/com.clipguard.agent.plist`:
+- `__CLIPGUARD_BIN__`: absolute path to your `clipguard` binary
+- `__WORKDIR__`: working directory for the process
+- `__LOG_DIR__`: writable directory for stdout/stderr logs
+
+3. Load and verify:
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.clipguard.agent.plist
+launchctl print gui/$(id -u)/com.clipguard.agent
+```
+
+4. Stop/remove when needed:
+
+```bash
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.clipguard.agent.plist
+rm ~/Library/LaunchAgents/com.clipguard.agent.plist
+```
 
 ## Manual Test Checklist (macOS)
 

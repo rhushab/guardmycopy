@@ -16,8 +16,36 @@ import (
 const defaultPollInterval = 500 * time.Millisecond
 
 const (
-	defaultConfigDirName  = ".config/clipguard"
-	defaultConfigFileName = "config.yaml"
+	defaultConfigDirName       = "clipguard"
+	defaultConfigFileName      = "config.yaml"
+	legacyDefaultConfigDirName = ".config/clipguard"
+	defaultConfigDirMode       = 0o755
+	defaultConfigFileMode      = 0o644
+	defaultConfigTemplate      = `global:
+  poll_interval_ms: 500
+  thresholds:
+    med: 8
+    high: 15
+  detector_toggles:
+    pem_private_key: true
+    jwt: true
+    env_secret: true
+    high_entropy_token: true
+  actions:
+    low: allow
+    med: sanitize
+    high: block
+  allowlist_patterns:
+    - '(?i)^public_[A-Z0-9_]+$'
+
+per_app:
+  "Google Chrome":
+    actions:
+      med: warn
+      high: sanitize
+    allowlist_patterns:
+      - '^chrome-extension://'
+`
 )
 
 type Action string
@@ -104,11 +132,54 @@ func Defaults() Config {
 }
 
 func DefaultPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return filepath.Join(defaultConfigDirName, defaultConfigFileName)
+	configDir, err := os.UserConfigDir()
+	if err == nil && strings.TrimSpace(configDir) != "" {
+		return filepath.Join(configDir, defaultConfigDirName, defaultConfigFileName)
 	}
-	return filepath.Join(home, defaultConfigDirName, defaultConfigFileName)
+
+	home, err := os.UserHomeDir()
+	if err == nil && strings.TrimSpace(home) != "" {
+		return filepath.Join(home, legacyDefaultConfigDirName, defaultConfigFileName)
+	}
+
+	return filepath.Join(defaultConfigDirName, defaultConfigFileName)
+}
+
+func DefaultTemplate() string {
+	return defaultConfigTemplate
+}
+
+func WriteDefault(path string, overwrite bool) (string, error) {
+	resolvedPath := strings.TrimSpace(path)
+	if resolvedPath == "" {
+		resolvedPath = DefaultPath()
+	}
+
+	if err := os.MkdirAll(filepath.Dir(resolvedPath), defaultConfigDirMode); err != nil {
+		return "", fmt.Errorf("create config directory: %w", err)
+	}
+
+	openFlags := os.O_CREATE | os.O_WRONLY
+	if overwrite {
+		openFlags |= os.O_TRUNC
+	} else {
+		openFlags |= os.O_EXCL
+	}
+
+	file, err := os.OpenFile(resolvedPath, openFlags, defaultConfigFileMode)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return "", fmt.Errorf("config file already exists at %s (use --force to overwrite)", resolvedPath)
+		}
+		return "", fmt.Errorf("open config file: %w", err)
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(defaultConfigTemplate); err != nil {
+		return "", fmt.Errorf("write config file: %w", err)
+	}
+
+	return resolvedPath, nil
 }
 
 func Load(path string) (Config, error) {

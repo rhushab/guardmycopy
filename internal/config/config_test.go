@@ -156,3 +156,73 @@ func TestLoadRejectsUnsupportedAction(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestWriteDefaultCreatesConfigFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "config.yaml")
+
+	writtenPath, err := WriteDefault(path, false)
+	if err != nil {
+		t.Fatalf("WriteDefault returned error: %v", err)
+	}
+	if writtenPath != path {
+		t.Fatalf("unexpected written path: got %q want %q", writtenPath, path)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if string(data) != DefaultTemplate() {
+		t.Fatal("written config did not match default template")
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Global.ActionForRisk(core.RiskLevelHigh) != ActionBlock {
+		t.Fatalf("unexpected high risk action: %q", cfg.Global.ActionForRisk(core.RiskLevelHigh))
+	}
+}
+
+func TestWriteDefaultRejectsExistingWithoutForce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+
+	if err := os.WriteFile(path, []byte("global:\n  poll_interval_ms: 100\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := WriteDefault(path, false); err == nil {
+		t.Fatal("expected WriteDefault to fail when file exists without force")
+	}
+
+	writtenPath, err := WriteDefault(path, true)
+	if err != nil {
+		t.Fatalf("WriteDefault with force returned error: %v", err)
+	}
+	if writtenPath != path {
+		t.Fatalf("unexpected written path: got %q want %q", writtenPath, path)
+	}
+}
+
+func TestWriteDefaultUsesDefaultPathWhenEmpty(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+	path, err := WriteDefault("", false)
+	if err != nil {
+		t.Fatalf("WriteDefault returned error: %v", err)
+	}
+	if path != DefaultPath() {
+		t.Fatalf("unexpected default path: got %q want %q", path, DefaultPath())
+	}
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.PollInterval != 500*time.Millisecond {
+		t.Fatalf("unexpected poll interval: %v", cfg.PollInterval)
+	}
+}

@@ -3,12 +3,14 @@ package app
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/rhushabhbontapalle/clipguard/internal/auditlog"
 	"github.com/rhushabhbontapalle/clipguard/internal/config"
 	"github.com/rhushabhbontapalle/clipguard/internal/core"
 	"github.com/rhushabhbontapalle/clipguard/internal/platform"
@@ -26,12 +28,18 @@ type ScanDecision struct {
 	RiskLevel     core.RiskLevel
 	Action        config.Action
 	Findings      int
+	FindingTypes  []string
+	ContentHash   string
 	Allowlisted   bool
 }
 
 type RuntimeStateStore interface {
 	Load() (userstate.State, error)
 	Save(userstate.State) error
+}
+
+type AuditLogStore interface {
+	Log(auditlog.Entry) error
 }
 
 type Service struct {
@@ -46,6 +54,7 @@ type Service struct {
 	lastAlertByHash map[[32]byte]time.Time
 	timeNow         func() time.Time
 	stateStore      RuntimeStateStore
+	auditLogStore   AuditLogStore
 	verboseOutput   io.Writer
 }
 
@@ -103,20 +112,29 @@ func (s *Service) ScanCurrentDetailed() (ScanDecision, []string, error) {
 	if err != nil {
 		return ScanDecision{}, nil, fmt.Errorf("read clipboard: %w", err)
 	}
+	currentHash := hashText(current)
 
 	decision, result := s.decide(current)
-	return ScanDecision{
+	scanDecision := ScanDecision{
 		ActiveAppName: decision.ActiveAppName,
 		Score:         decision.Score,
 		RiskLevel:     decision.RiskLevel,
 		Action:        decision.Action,
 		Findings:      len(result.Findings),
+		FindingTypes:  findingTypes(result.Findings),
+		ContentHash:   hashToHex(currentHash),
 		Allowlisted:   result.Allowlisted,
-	}, s.decisionReasoning(decision, result), nil
+	}
+	s.writeAuditLog(scanDecision)
+	return scanDecision, s.decisionReasoning(decision, result), nil
 }
 
 func (s *Service) SetRuntimeStateStore(store RuntimeStateStore) {
 	s.stateStore = store
+}
+
+func (s *Service) SetAuditLogStore(store AuditLogStore) {
+	s.auditLogStore = store
 }
 
 func (s *Service) SetVerboseOutput(output io.Writer) {
@@ -154,10 +172,14 @@ func (s *Service) Sanitize(showDiff bool) (bool, error) {
 }
 
 func detectorsTriggered(findings []core.Finding) []string {
-	if len(findings) == 0 {
+	out := findingTypes(findings)
+	if len(out) == 0 {
 		return []string{"none"}
 	}
+	return out
+}
 
+func findingTypes(findings []core.Finding) []string {
 	unique := make(map[string]struct{}, len(findings))
 	for _, finding := range findings {
 		unique[finding.Type] = struct{}{}
@@ -223,6 +245,16 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 			if err != nil {
 				return err
 			}
+			s.writeAuditLog(ScanDecision{
+				ActiveAppName: decision.ActiveAppName,
+				Score:         decision.Score,
+				RiskLevel:     decision.RiskLevel,
+				Action:        decision.Action,
+				Findings:      len(result.Findings),
+				FindingTypes:  findingTypes(result.Findings),
+				ContentHash:   hashToHex(currentHash),
+				Allowlisted:   result.Allowlisted,
+			})
 			if changed {
 				lastSeenHash = hashText(nextValue)
 			}
@@ -430,6 +462,10 @@ func hashText(value string) [32]byte {
 	return sha256.Sum256([]byte(value))
 }
 
+func hashToHex(value [32]byte) string {
+	return hex.EncodeToString(value[:])
+}
+
 func cloneDetectorToggles(input map[string]bool) map[string]bool {
 	out := make(map[string]bool, len(input))
 	for detectorType, enabled := range input {
@@ -490,6 +526,25 @@ func (s *Service) logVerbose(format string, args ...any) {
 		return
 	}
 	_, _ = fmt.Fprintf(s.verboseOutput, format+"\n", args...)
+}
+
+func (s *Service) writeAuditLog(decision ScanDecision) {
+	if s.auditLogStore == nil {
+		return
+	}
+
+	entry := auditlog.Entry{
+		Timestamp:    s.timeNow().UTC(),
+		App:          decision.ActiveAppName,
+		Score:        decision.Score,
+		RiskLevel:    string(decision.RiskLevel),
+		FindingTypes: append([]string(nil), decision.FindingTypes...),
+		Action:       string(decision.Action),
+		ContentHash:  decision.ContentHash,
+	}
+	if err := s.auditLogStore.Log(entry); err != nil {
+		s.logVerbose("audit log write failed: %v", err)
+	}
 }
 
 func (s *Service) decisionReasoning(decision PolicyDecision, result policyResult) []string {
