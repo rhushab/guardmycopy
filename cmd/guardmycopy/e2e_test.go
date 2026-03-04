@@ -251,7 +251,7 @@ func TestE2E_SanitizeEnvSecret(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestE2E_OncePEMKeyBlockAction(t *testing.T) {
-	clip := &testClipboard{
+	clip := &e2eClipboard{
 		value: "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
 	}
 	svc := app.New(config.Defaults(), clip)
@@ -277,7 +277,7 @@ func TestE2E_OncePEMKeyBlockAction(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestE2E_OnceCleanTextAllowAction(t *testing.T) {
-	clip := &testClipboard{value: "just some normal text"}
+	clip := &e2eClipboard{value: "just some normal text"}
 	svc := app.New(config.Defaults(), clip)
 
 	var stdout, stderr bytes.Buffer
@@ -563,7 +563,7 @@ func TestE2E_AllowOnceBypassesEnforcementOnce(t *testing.T) {
 func TestE2E_AuditLogWriteAndTail(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "audit.jsonl")
 
-	clip := &testClipboard{
+	clip := &e2eClipboard{
 		value: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
 	}
 	auditStore, err := auditlog.New(logPath)
@@ -842,7 +842,7 @@ func TestE2E_FullUserJourney(t *testing.T) {
 	}
 
 	// Step 3: Scan clean clipboard → allow.
-	clip := &testClipboard{value: "hello world"}
+	clip := &e2eClipboard{value: "hello world"}
 	svc := app.New(cfg, clip)
 	auditStore, err := auditlog.New(logPath)
 	if err != nil {
@@ -950,7 +950,7 @@ func TestE2E_LogEmptyAuditFile(t *testing.T) {
 func TestE2E_RunOnceFlag(t *testing.T) {
 	// The run command with --once flag internally calls runOnceWithService.
 	// We test this indirectly through the once pathway.
-	clip := &testClipboard{value: "normal text nothing sensitive"}
+	clip := &e2eClipboard{value: "normal text nothing sensitive"}
 	svc := app.New(config.Defaults(), clip)
 
 	var stdout, stderr bytes.Buffer
@@ -1080,7 +1080,7 @@ func TestE2E_CustomConfigThresholdsAndActions(t *testing.T) {
 	}
 
 	// With custom thresholds, a PEM key (score=15) is now med risk (10 <= 15 < 20).
-	clip := &testClipboard{
+	clip := &e2eClipboard{
 		value: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
 	}
 	svc := app.New(cfg, clip)
@@ -1112,7 +1112,7 @@ func TestE2E_PrivacyClipboardNotInAuditLog(t *testing.T) {
 	}
 
 	sensitiveContent := "-----BEGIN PRIVATE KEY-----\nMY_SUPER_SECRET_DATA_THAT_MUST_NOT_LEAK\n-----END PRIVATE KEY-----"
-	clip := &testClipboard{value: sensitiveContent}
+	clip := &e2eClipboard{value: sensitiveContent}
 	svc := app.New(config.Defaults(), clip)
 	svc.SetAuditLogStore(auditStore)
 
