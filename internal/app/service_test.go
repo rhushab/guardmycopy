@@ -3,11 +3,14 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/rhushabhbontapalle/clipguard/internal/config"
 	"github.com/rhushabhbontapalle/clipguard/internal/core"
+	"github.com/rhushabhbontapalle/clipguard/internal/userstate"
 )
 
 type mockClipboard struct {
@@ -15,9 +18,13 @@ type mockClipboard struct {
 	readErr  error
 	writeErr error
 	writes   int
+	readHook func()
 }
 
 func (m *mockClipboard) ReadText() (string, error) {
+	if m.readHook != nil {
+		m.readHook()
+	}
 	if m.readErr != nil {
 		return "", m.readErr
 	}
@@ -39,6 +46,29 @@ type mockNotifier struct {
 
 func (m *mockNotifier) Notify(_, _ string) error {
 	m.calls++
+	return nil
+}
+
+type mockRuntimeStateStore struct {
+	state     userstate.State
+	loadErr   error
+	saveErr   error
+	saveCalls int
+}
+
+func (m *mockRuntimeStateStore) Load() (userstate.State, error) {
+	if m.loadErr != nil {
+		return userstate.State{}, m.loadErr
+	}
+	return m.state, nil
+}
+
+func (m *mockRuntimeStateStore) Save(state userstate.State) error {
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	m.state = state
+	m.saveCalls++
 	return nil
 }
 
@@ -167,6 +197,44 @@ func TestScanCurrentReportsDecision(t *testing.T) {
 	}
 }
 
+func TestScanCurrentTreatsClipboardAllowlistAsAllow(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "clipguard.yaml")
+
+	content := `global:
+  allowlist_patterns:
+    - 'PRIVATE KEY'
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	clip := &mockClipboard{value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"}
+	svc := New(cfg, clip)
+
+	decision, err := svc.ScanCurrent()
+	if err != nil {
+		t.Fatalf("ScanCurrent returned error: %v", err)
+	}
+	if decision.Action != config.ActionAllow {
+		t.Fatalf("expected allow action, got %s", decision.Action)
+	}
+	if decision.Score != 0 {
+		t.Fatalf("expected score 0, got %d", decision.Score)
+	}
+	if decision.Findings != 0 {
+		t.Fatalf("expected 0 findings, got %d", decision.Findings)
+	}
+	if !decision.Allowlisted {
+		t.Fatal("expected allowlisted=true")
+	}
+}
+
 func TestApplyActionDebouncesNotificationsPerHash(t *testing.T) {
 	cfg := config.Defaults()
 	clip := &mockClipboard{}
@@ -218,5 +286,95 @@ func TestRunStopsWhenContextCanceled(t *testing.T) {
 	err := svc.Run(ctx, time.Millisecond)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context canceled, got %v", err)
+	}
+}
+
+func TestShouldBypassEnforcementSnoozed(t *testing.T) {
+	clip := &mockClipboard{value: "secret"}
+	svc := New(config.Defaults(), clip)
+
+	now := time.Unix(1_700_000_000, 0).UTC()
+	svc.timeNow = func() time.Time { return now }
+
+	stateStore := &mockRuntimeStateStore{
+		state: userstate.State{
+			SnoozedUntil: now.Add(5 * time.Minute),
+		},
+	}
+	svc.SetRuntimeStateStore(stateStore)
+
+	bypass, reason, err := svc.shouldBypassEnforcement()
+	if err != nil {
+		t.Fatalf("shouldBypassEnforcement returned error: %v", err)
+	}
+	if !bypass {
+		t.Fatal("expected bypass to be true")
+	}
+	if reason == "" {
+		t.Fatal("expected bypass reason")
+	}
+	if stateStore.saveCalls != 0 {
+		t.Fatalf("expected no save calls, got %d", stateStore.saveCalls)
+	}
+}
+
+func TestShouldBypassEnforcementConsumesAllowOnce(t *testing.T) {
+	clip := &mockClipboard{value: "secret"}
+	svc := New(config.Defaults(), clip)
+
+	now := time.Unix(1_700_000_000, 0).UTC()
+	svc.timeNow = func() time.Time { return now }
+
+	stateStore := &mockRuntimeStateStore{
+		state: userstate.State{
+			AllowOnce: true,
+		},
+	}
+	svc.SetRuntimeStateStore(stateStore)
+
+	bypass, reason, err := svc.shouldBypassEnforcement()
+	if err != nil {
+		t.Fatalf("shouldBypassEnforcement returned error: %v", err)
+	}
+	if !bypass {
+		t.Fatal("expected bypass to be true")
+	}
+	if reason != "allow-once consumed" {
+		t.Fatalf("unexpected reason: %q", reason)
+	}
+	if stateStore.state.AllowOnce {
+		t.Fatal("expected allow_once to be consumed")
+	}
+	if stateStore.saveCalls != 1 {
+		t.Fatalf("expected one save call, got %d", stateStore.saveCalls)
+	}
+}
+
+func TestRunRespectsAllowOnceState(t *testing.T) {
+	clip := &mockClipboard{value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"}
+	svc := New(config.Defaults(), clip)
+
+	stateStore := &mockRuntimeStateStore{
+		state: userstate.State{
+			AllowOnce: true,
+		},
+	}
+	svc.SetRuntimeStateStore(stateStore)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	clip.readHook = func() {
+		cancel()
+		clip.readHook = nil
+	}
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if clip.writes != 0 {
+		t.Fatalf("expected run to skip enforcement due to allow-once, writes=%d", clip.writes)
+	}
+	if stateStore.state.AllowOnce {
+		t.Fatal("expected allow_once to be consumed during run")
 	}
 }

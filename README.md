@@ -68,10 +68,34 @@ Scan current clipboard once and print decision:
 ./clipguard once
 ```
 
+Scan once with reasoning details:
+
+```bash
+./clipguard once --verbose
+```
+
 Equivalent one-shot mode via `run`:
 
 ```bash
 ./clipguard run --once
+```
+
+Run polling mode with reasoning logs:
+
+```bash
+./clipguard run --verbose
+```
+
+Temporarily disable enforcement:
+
+```bash
+./clipguard snooze 5m
+```
+
+Allow only the next clipboard event to bypass enforcement once:
+
+```bash
+./clipguard allow-once
 ```
 
 Print version:
@@ -83,6 +107,10 @@ Print version:
 Config is optional. When `--config` is omitted, clipguard uses built-in defaults and then attempts:
 
 `~/.config/clipguard/config.yaml`
+
+Runtime user controls (`snooze` / `allow-once`) are stored in:
+
+`$(os.UserConfigDir)/clipguard/state.json`
 
 YAML schema:
 
@@ -118,6 +146,10 @@ Action options per risk level:
 - `warn`: show a notification and keep clipboard unchanged
 - `sanitize`: redact matched secret spans, write sanitized text, and notify
 - `block`: replace clipboard content with `[CLIPGUARD BLOCKED]` and notify
+
+Allowlist behavior:
+- If a full clipboard value matches an `allowlist_patterns` regex, clipguard treats it as `allow`.
+- Matched finding spans are also skipped when they match allowlist regexes.
 
 Use [`configs/example.yaml`](configs/example.yaml) as a starting point.
 

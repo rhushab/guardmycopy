@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/rhushabhbontapalle/clipguard/internal/config"
 	"github.com/rhushabhbontapalle/clipguard/internal/core"
 	"github.com/rhushabhbontapalle/clipguard/internal/platform"
+	"github.com/rhushabhbontapalle/clipguard/internal/userstate"
 )
 
 const (
@@ -24,6 +26,12 @@ type ScanDecision struct {
 	RiskLevel     core.RiskLevel
 	Action        config.Action
 	Findings      int
+	Allowlisted   bool
+}
+
+type RuntimeStateStore interface {
+	Load() (userstate.State, error)
+	Save(userstate.State) error
 }
 
 type Service struct {
@@ -37,6 +45,8 @@ type Service struct {
 	alertDebounce   time.Duration
 	lastAlertByHash map[[32]byte]time.Time
 	timeNow         func() time.Time
+	stateStore      RuntimeStateStore
+	verboseOutput   io.Writer
 }
 
 func New(cfg config.Config, clipboard platform.Clipboard) *Service {
@@ -84,9 +94,14 @@ func NewWithDependencies(
 }
 
 func (s *Service) ScanCurrent() (ScanDecision, error) {
+	decision, _, err := s.ScanCurrentDetailed()
+	return decision, err
+}
+
+func (s *Service) ScanCurrentDetailed() (ScanDecision, []string, error) {
 	current, err := s.clipboard.ReadText()
 	if err != nil {
-		return ScanDecision{}, fmt.Errorf("read clipboard: %w", err)
+		return ScanDecision{}, nil, fmt.Errorf("read clipboard: %w", err)
 	}
 
 	decision, result := s.decide(current)
@@ -96,7 +111,16 @@ func (s *Service) ScanCurrent() (ScanDecision, error) {
 		RiskLevel:     decision.RiskLevel,
 		Action:        decision.Action,
 		Findings:      len(result.Findings),
-	}, nil
+		Allowlisted:   result.Allowlisted,
+	}, s.decisionReasoning(decision, result), nil
+}
+
+func (s *Service) SetRuntimeStateStore(store RuntimeStateStore) {
+	s.stateStore = store
+}
+
+func (s *Service) SetVerboseOutput(output io.Writer) {
+	s.verboseOutput = output
 }
 
 func (s *Service) Sanitize(showDiff bool) (bool, error) {
@@ -173,7 +197,27 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 			seen = true
 			lastSeenHash = currentHash
 
+			bypass, bypassReason, err := s.shouldBypassEnforcement()
+			if err != nil {
+				return err
+			}
+			if bypass {
+				s.logVerbose("action=allow reason=%s", bypassReason)
+				continue
+			}
+
 			decision, result := s.decide(current)
+			s.logVerbose(
+				"app=%q action=%s risk=%s score=%d findings=%d",
+				decision.ActiveAppName,
+				decision.Action,
+				decision.RiskLevel,
+				decision.Score,
+				len(result.Findings),
+			)
+			for _, reason := range s.decisionReasoning(decision, result) {
+				s.logVerbose("reason=%s", reason)
+			}
 
 			changed, nextValue, err := s.applyAction(decision, current, result.SanitizedText, currentHash)
 			if err != nil {
@@ -189,6 +233,14 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 func (s *Service) decide(text string) (PolicyDecision, policyResult) {
 	activeAppName := s.resolveActiveAppName()
 	result := s.analyze(text, activeAppName)
+	if result.Allowlisted {
+		return PolicyDecision{
+			ActiveAppName: activeAppName,
+			Score:         0,
+			RiskLevel:     core.RiskLevelLow,
+			Action:        config.ActionAllow,
+		}, result
+	}
 	decision := s.policyResolver.Resolve(activeAppName, result.Score, result.RiskLevel)
 	return decision, result
 }
@@ -198,11 +250,22 @@ type policyResult struct {
 	Score         int
 	RiskLevel     core.RiskLevel
 	SanitizedText string
+	Allowlisted   bool
 }
 
 func (s *Service) analyze(text string, activeAppName string) policyResult {
-	scan := s.engine.Scan(text)
 	policy := s.cfg.PolicyForApp(activeAppName)
+	if policy.IsAllowlisted(text) {
+		return policyResult{
+			Findings:      nil,
+			Score:         0,
+			RiskLevel:     core.RiskLevelLow,
+			SanitizedText: text,
+			Allowlisted:   true,
+		}
+	}
+
+	scan := s.engine.Scan(text)
 	findings := filterFindings(text, scan.Findings, policy)
 	score := scoreFindings(findings)
 	riskLevel := riskFromScore(score, policy.Thresholds, scan.RiskLevel)
@@ -217,6 +280,7 @@ func (s *Service) analyze(text string, activeAppName string) policyResult {
 		Score:         score,
 		RiskLevel:     riskLevel,
 		SanitizedText: sanitized,
+		Allowlisted:   false,
 	}
 }
 
@@ -380,4 +444,67 @@ func cloneActions(input map[core.RiskLevel]config.Action) map[core.RiskLevel]con
 		out[riskLevel] = action
 	}
 	return out
+}
+
+func (s *Service) shouldBypassEnforcement() (bool, string, error) {
+	if s.stateStore == nil {
+		return false, "", nil
+	}
+
+	state, err := s.stateStore.Load()
+	if err != nil {
+		return false, "", fmt.Errorf("load runtime state: %w", err)
+	}
+
+	now := s.timeNow()
+	if !state.SnoozedUntil.IsZero() && state.SnoozedUntil.After(now) {
+		return true, fmt.Sprintf("snoozed until %s", state.SnoozedUntil.Local().Format(time.RFC3339)), nil
+	}
+
+	dirty := false
+	if !state.SnoozedUntil.IsZero() && !state.SnoozedUntil.After(now) {
+		state.SnoozedUntil = time.Time{}
+		dirty = true
+	}
+
+	if state.AllowOnce {
+		state.AllowOnce = false
+		dirty = true
+		if err := s.stateStore.Save(state); err != nil {
+			return false, "", fmt.Errorf("save runtime state: %w", err)
+		}
+		return true, "allow-once consumed", nil
+	}
+
+	if dirty {
+		if err := s.stateStore.Save(state); err != nil {
+			return false, "", fmt.Errorf("save runtime state: %w", err)
+		}
+	}
+
+	return false, "", nil
+}
+
+func (s *Service) logVerbose(format string, args ...any) {
+	if s.verboseOutput == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(s.verboseOutput, format+"\n", args...)
+}
+
+func (s *Service) decisionReasoning(decision PolicyDecision, result policyResult) []string {
+	if result.Allowlisted {
+		return []string{"clipboard matched allowlist regex; treated as allow"}
+	}
+	if len(result.Findings) == 0 {
+		return []string{
+			"no active findings after detector toggles and allowlist filtering",
+			fmt.Sprintf("policy resolved action=%s for risk=%s", decision.Action, decision.RiskLevel),
+		}
+	}
+
+	return []string{
+		fmt.Sprintf("detectors=%s", strings.Join(detectorsTriggered(result.Findings), ",")),
+		fmt.Sprintf("policy resolved action=%s for risk=%s", decision.Action, decision.RiskLevel),
+	}
 }
