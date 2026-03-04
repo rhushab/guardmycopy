@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rhushabhbontapalle/clipguard/internal/config"
+	"github.com/rhushabhbontapalle/clipguard/internal/core"
 )
 
 type mockClipboard struct {
@@ -64,6 +65,74 @@ func TestSanitizeNoopWhenUnchanged(t *testing.T) {
 	}
 	if clip.writes != 0 {
 		t.Fatalf("expected no writes, got %d", clip.writes)
+	}
+}
+
+func TestSanitizeSkipsDisabledDetector(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Global.DetectorToggles[core.FindingTypePEMPrivateKey] = false
+
+	clip := &mockClipboard{value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"}
+	svc := New(cfg, clip)
+
+	changed, err := svc.Sanitize(false)
+	if err != nil {
+		t.Fatalf("Sanitize returned error: %v", err)
+	}
+	if changed {
+		t.Fatal("expected sanitize to be skipped for disabled detector")
+	}
+	if clip.writes != 0 {
+		t.Fatalf("expected no writes, got %d", clip.writes)
+	}
+}
+
+func TestSanitizeWarnActionDoesNotWrite(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Global.Actions[core.RiskLevelHigh] = config.ActionWarn
+
+	clip := &mockClipboard{value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"}
+
+	notifies := 0
+	svc := NewWithDependencies(cfg, clip, nil, func(title, message string) error {
+		notifies++
+		return nil
+	})
+
+	changed, err := svc.Sanitize(false)
+	if err != nil {
+		t.Fatalf("Sanitize returned error: %v", err)
+	}
+	if changed {
+		t.Fatal("expected warn action to avoid clipboard mutation")
+	}
+	if clip.writes != 0 {
+		t.Fatalf("expected no writes, got %d", clip.writes)
+	}
+	if notifies != 1 {
+		t.Fatalf("expected 1 notification, got %d", notifies)
+	}
+}
+
+func TestSanitizeBlockActionClearsClipboard(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Global.Actions[core.RiskLevelHigh] = config.ActionBlock
+
+	clip := &mockClipboard{value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"}
+	svc := New(cfg, clip)
+
+	changed, err := svc.Sanitize(false)
+	if err != nil {
+		t.Fatalf("Sanitize returned error: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected block action to mutate clipboard")
+	}
+	if clip.writes != 1 {
+		t.Fatalf("expected one write, got %d", clip.writes)
+	}
+	if clip.value != "" {
+		t.Fatalf("expected clipboard to be cleared, got %q", clip.value)
 	}
 }
 

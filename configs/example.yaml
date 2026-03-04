@@ -1,0 +1,33 @@
+global:
+  poll_interval_ms: 500
+  thresholds:
+    med: 8
+    high: 15
+  detector_toggles:
+    pem_private_key: true
+    jwt: true
+    env_secret: true
+    high_entropy_token: true
+  actions:
+    low: allow
+    med: sanitize
+    high: block
+  allowlist_patterns:
+    - '(?i)^public_[A-Z0-9_]+$'
+
+per_app:
+  "Google Chrome":
+    actions:
+      med: warn
+      high: sanitize
+    allowlist_patterns:
+      - '^chrome-extension://'
+  "iTerm2":
+    detector_toggles:
+      high_entropy_token: false
+  "Visual Studio Code":
+    thresholds:
+      med: 12
+      high: 20
+    actions:
+      high: block

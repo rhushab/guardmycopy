@@ -50,21 +50,58 @@ Run polling mode with custom interval (ms):
 ./clipguard run --interval 250
 ```
 
+Run polling mode with an explicit YAML config path:
+
+```bash
+./clipguard run --config ./configs/example.yaml
+```
+
 Print version:
 
 ```bash
 ./clipguard --version
 ```
 
-Use a JSON config file (optional):
+Config is optional. When `--config` is omitted, clipguard uses built-in defaults and then attempts:
 
-```json
-{
-  "poll_interval_ms": 500
-}
+`~/.config/clipguard/config.yaml`
+
+YAML schema:
+
+```yaml
+global:
+  poll_interval_ms: 500
+  thresholds:
+    med: 8
+    high: 15
+  detector_toggles:
+    pem_private_key: true
+    jwt: true
+    env_secret: true
+    high_entropy_token: true
+  actions:
+    low: allow
+    med: sanitize
+    high: block
+  allowlist_patterns:
+    - '(?i)^public_[A-Z0-9_]+$'
+
+per_app:
+  "Google Chrome":
+    actions:
+      med: warn
+      high: sanitize
+    allowlist_patterns:
+      - '^chrome-extension://'
 ```
 
-Commands accept `--config /path/to/config.json`.
+Action options per risk level:
+- `allow`: keep clipboard content unchanged
+- `warn`: show a notification and keep clipboard unchanged
+- `sanitize`: redact matched secret spans
+- `block`: clear clipboard content
+
+Use [`configs/example.yaml`](configs/example.yaml) as a starting point.
 
 ## Test
 

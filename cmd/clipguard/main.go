@@ -127,7 +127,7 @@ func runLoop(args []string) int {
 	fs.SetOutput(os.Stderr)
 
 	intervalMS := fs.Int("interval", 0, "poll interval in milliseconds (defaults to config)")
-	configPath := fs.String("config", "", "path to JSON config file")
+	configPath := fs.String("config", "", "path to YAML config file (optional)")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -153,7 +153,7 @@ func runLoop(args []string) int {
 		interval = time.Duration(*intervalMS) * time.Millisecond
 	}
 
-	svc := app.New(cfg, darwin.NewClipboard())
+	svc := app.NewWithDependencies(cfg, darwin.NewClipboard(), darwin.ActiveApp, darwin.Notify)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -166,8 +166,12 @@ func runLoop(args []string) int {
 }
 
 func printUsage(w io.Writer) {
-	_, _ = fmt.Fprintln(w, `Usage:
+	_, _ = fmt.Fprintf(w, `Usage:
   clipguard sanitize [--diff] < input.txt
   clipguard run [--interval ms] [--config path]
-  clipguard --version`)
+  clipguard --version
+
+When --config is not set, clipguard loads defaults and then attempts:
+  %s
+`, config.DefaultPath())
 }
