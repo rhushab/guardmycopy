@@ -1,0 +1,9 @@
+one
+-----BEGIN PRIVATE KEY-----
+abc
+-----END PRIVATE KEY-----
+two
+-----BEGIN OPENSSH PRIVATE KEY-----
+xyz
+-----END OPENSSH PRIVATE KEY-----
+three
