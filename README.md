@@ -12,6 +12,12 @@ Current detectors:
 - Env-style secrets (`KEY=VALUE` for secret-like key names)
 - High-entropy long tokens
 
+## macOS permissions
+
+`clipguard` asks macOS `System Events` for the frontmost app name. On some systems this requires enabling Accessibility access for the terminal/app running `clipguard`:
+
+`System Settings -> Privacy & Security -> Accessibility`
+
 ## Build
 
 ```bash
@@ -102,6 +108,33 @@ Action options per risk level:
 - `block`: clear clipboard content
 
 Use [`configs/example.yaml`](configs/example.yaml) as a starting point.
+
+## Basic smoke run (macOS)
+
+1. Build:
+
+```bash
+go build ./cmd/clipguard
+```
+
+2. Verify sanitize pipeline quickly:
+
+```bash
+echo 'token=AKIAIOSFODNN7EXAMPLE' | ./clipguard sanitize --diff
+```
+
+3. Start polling loop:
+
+```bash
+./clipguard run --interval 250
+```
+
+4. In another terminal, copy a known secret pattern and confirm clipboard output is sanitized/blocked per config:
+
+```bash
+printf '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n' | pbcopy
+pbpaste
+```
 
 ## Test
 

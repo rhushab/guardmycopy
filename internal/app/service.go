@@ -9,32 +9,28 @@ import (
 
 	"github.com/rhushabhbontapalle/clipguard/internal/config"
 	"github.com/rhushabhbontapalle/clipguard/internal/core"
+	"github.com/rhushabhbontapalle/clipguard/internal/platform"
 )
-
-type Clipboard interface {
-	Read() (string, error)
-	Write(value string) error
-}
 
 type Service struct {
 	cfg            config.Config
-	clipboard      Clipboard
+	clipboard      platform.Clipboard
 	engine         *core.Engine
 	redactor       core.Redactor
 	policyResolver *PolicyResolver
-	activeApp      func() (string, error)
-	notifier       func(title, message string) error
+	foregroundApp  platform.ForegroundApp
+	notifier       platform.Notifier
 }
 
-func New(cfg config.Config, clipboard Clipboard) *Service {
+func New(cfg config.Config, clipboard platform.Clipboard) *Service {
 	return NewWithDependencies(cfg, clipboard, nil, nil)
 }
 
 func NewWithDependencies(
 	cfg config.Config,
-	clipboard Clipboard,
-	activeApp func() (string, error),
-	notifier func(title, message string) error,
+	clipboard platform.Clipboard,
+	foregroundApp platform.ForegroundApp,
+	notifier platform.Notifier,
 ) *Service {
 	defaults := config.Defaults()
 	if cfg.PollInterval <= 0 {
@@ -62,13 +58,13 @@ func NewWithDependencies(
 		engine:         core.New(),
 		redactor:       core.NewFormatPreservingRedactor(),
 		policyResolver: NewPolicyResolver(cfg),
-		activeApp:      activeApp,
+		foregroundApp:  foregroundApp,
 		notifier:       notifier,
 	}
 }
 
 func (s *Service) Sanitize(showDiff bool) (bool, error) {
-	current, err := s.clipboard.Read()
+	current, err := s.clipboard.ReadText()
 	if err != nil {
 		return false, fmt.Errorf("read clipboard: %w", err)
 	}
@@ -131,7 +127,7 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			current, err := s.clipboard.Read()
+			current, err := s.clipboard.ReadText()
 			if err != nil {
 				return fmt.Errorf("read clipboard: %w", err)
 			}
@@ -217,10 +213,10 @@ func scoreFindings(findings []core.Finding) int {
 }
 
 func (s *Service) resolveActiveAppName() string {
-	if s.activeApp == nil {
+	if s.foregroundApp == nil {
 		return ""
 	}
-	activeAppName, err := s.activeApp()
+	activeAppName, err := s.foregroundApp.ActiveAppName()
 	if err != nil {
 		return ""
 	}
@@ -242,7 +238,7 @@ func (s *Service) applyAction(
 		if current == "" {
 			return false, current, nil
 		}
-		if err := s.clipboard.Write(""); err != nil {
+		if err := s.clipboard.WriteText(""); err != nil {
 			return false, current, fmt.Errorf("write clipboard: %w", err)
 		}
 		return true, "", nil
@@ -252,7 +248,7 @@ func (s *Service) applyAction(
 		if sanitized == current {
 			return false, current, nil
 		}
-		if err := s.clipboard.Write(sanitized); err != nil {
+		if err := s.clipboard.WriteText(sanitized); err != nil {
 			return false, current, fmt.Errorf("write clipboard: %w", err)
 		}
 		return true, sanitized, nil
@@ -286,7 +282,7 @@ func (s *Service) notifyWarning(decision PolicyDecision) {
 		decision.RiskLevel,
 		decision.Score,
 	)
-	_ = s.notifier("clipguard warning", message)
+	_ = s.notifier.Notify("Clipguard warning", message)
 }
 
 func cloneDetectorToggles(input map[string]bool) map[string]bool {

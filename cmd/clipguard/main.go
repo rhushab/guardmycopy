@@ -16,7 +16,7 @@ import (
 	"github.com/rhushabhbontapalle/clipguard/internal/app"
 	"github.com/rhushabhbontapalle/clipguard/internal/config"
 	"github.com/rhushabhbontapalle/clipguard/internal/core"
-	"github.com/rhushabhbontapalle/clipguard/internal/platform/darwin"
+	"github.com/rhushabhbontapalle/clipguard/internal/platform"
 )
 
 const version = "0.1.0"
@@ -153,7 +153,13 @@ func runLoop(args []string) int {
 		interval = time.Duration(*intervalMS) * time.Millisecond
 	}
 
-	svc := app.NewWithDependencies(cfg, darwin.NewClipboard(), darwin.ActiveApp, darwin.Notify)
+	adapters, err := platform.Select()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+
+	svc := app.NewWithDependencies(cfg, adapters.Clipboard, adapters.ForegroundApp, adapters.Notifier)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

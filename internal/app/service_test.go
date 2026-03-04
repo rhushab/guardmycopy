@@ -17,19 +17,28 @@ type mockClipboard struct {
 	writes   int
 }
 
-func (m *mockClipboard) Read() (string, error) {
+func (m *mockClipboard) ReadText() (string, error) {
 	if m.readErr != nil {
 		return "", m.readErr
 	}
 	return m.value, nil
 }
 
-func (m *mockClipboard) Write(value string) error {
+func (m *mockClipboard) WriteText(value string) error {
 	if m.writeErr != nil {
 		return m.writeErr
 	}
 	m.value = value
 	m.writes++
+	return nil
+}
+
+type mockNotifier struct {
+	calls int
+}
+
+func (m *mockNotifier) Notify(_, _ string) error {
+	m.calls++
 	return nil
 }
 
@@ -92,12 +101,8 @@ func TestSanitizeWarnActionDoesNotWrite(t *testing.T) {
 	cfg.Global.Actions[core.RiskLevelHigh] = config.ActionWarn
 
 	clip := &mockClipboard{value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"}
-
-	notifies := 0
-	svc := NewWithDependencies(cfg, clip, nil, func(title, message string) error {
-		notifies++
-		return nil
-	})
+	notifier := &mockNotifier{}
+	svc := NewWithDependencies(cfg, clip, nil, notifier)
 
 	changed, err := svc.Sanitize(false)
 	if err != nil {
@@ -109,8 +114,8 @@ func TestSanitizeWarnActionDoesNotWrite(t *testing.T) {
 	if clip.writes != 0 {
 		t.Fatalf("expected no writes, got %d", clip.writes)
 	}
-	if notifies != 1 {
-		t.Fatalf("expected 1 notification, got %d", notifies)
+	if notifier.calls != 1 {
+		t.Fatalf("expected 1 notification, got %d", notifier.calls)
 	}
 }
 
