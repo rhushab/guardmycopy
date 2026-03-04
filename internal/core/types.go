@@ -8,6 +8,13 @@ const (
 	SeverityHigh   Severity = "high"
 )
 
+const (
+	FindingTypePEMPrivateKey    = "pem_private_key"
+	FindingTypeJWT              = "jwt"
+	FindingTypeEnvSecret        = "env_secret"
+	FindingTypeHighEntropyToken = "high_entropy_token"
+)
+
 type RiskLevel string
 
 const (

@@ -2,24 +2,64 @@ package core
 
 import "testing"
 
-func TestReplacementRedactorRedactsByType(t *testing.T) {
-	redactor := NewReplacementRedactor(map[string]string{
-		FindingTypePEMPrivateKey: "[REDACTED_PRIVATE_KEY]",
-	})
-	input := "foo -----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY----- bar"
-	start := 4
-	end := len(input) - 4
+func TestFormatPreservingRedactor(t *testing.T) {
+	redactor := NewFormatPreservingRedactor()
 
-	got := redactor.Redact(input, []Finding{
+	tests := []struct {
+		name     string
+		input    string
+		findings []Finding
+		want     string
+	}{
 		{
-			Type:  FindingTypePEMPrivateKey,
-			Start: start,
-			End:   end,
+			name:  "masks middle and keeps prefix/suffix",
+			input: "token=abcdefghijklmnop",
+			findings: []Finding{
+				{
+					Type:  FindingTypeEnvSecret,
+					Start: len("token="),
+					End:   len("token=abcdefghijklmnop"),
+				},
+			},
+			want: "token=ab************op",
 		},
-	})
+		{
+			name:  "preserves whitespace in masked section",
+			input: "foo abc\ndef\nghi uvw",
+			findings: []Finding{
+				{
+					Type:  FindingTypePEMPrivateKey,
+					Start: len("foo "),
+					End:   len("foo abc\ndef\nghi"),
+				},
+			},
+			want: "foo a**\n***\n**i uvw",
+		},
+		{
+			name:  "uses larger overlap first",
+			input: "KEY=ABCDEF1234567890",
+			findings: []Finding{
+				{
+					Type:  FindingTypeHighEntropyToken,
+					Start: len("KEY=AB"),
+					End:   len("KEY=ABCDEF12345678"),
+				},
+				{
+					Type:  FindingTypeEnvSecret,
+					Start: len("KEY="),
+					End:   len("KEY=ABCDEF1234567890"),
+				},
+			},
+			want: "KEY=AB************90",
+		},
+	}
 
-	want := "foo [REDACTED_PRIVATE_KEY] bar"
-	if got != want {
-		t.Fatalf("unexpected redaction: got %q want %q", got, want)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := redactor.Redact(tc.input, tc.findings)
+			if got != tc.want {
+				t.Fatalf("unexpected redaction: got %q want %q", got, tc.want)
+			}
+		})
 	}
 }

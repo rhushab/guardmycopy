@@ -8,7 +8,7 @@ import (
 
 func TestRunSanitizeWithIO(t *testing.T) {
 	input := "hello\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nworld"
-	want := "hello\n[REDACTED_PRIVATE_KEY]\nworld"
+	want := "hello\n---******* ******* ********\n***\n******** ******* *****---\nworld"
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -34,11 +34,17 @@ func TestRunSanitizeWithIODiff(t *testing.T) {
 		t.Fatalf("expected exit code 0, got %d", code)
 	}
 
-	if !strings.Contains(stderr.String(), "findings: 1") {
+	if !strings.Contains(stderr.String(), "findings=1") {
 		t.Fatalf("expected findings summary in stderr, got %q", stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "risk=high") {
 		t.Fatalf("expected risk level in stderr, got %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "score=15") {
+		t.Fatalf("expected score in stderr, got %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "detectors: pem_private_key") {
+		t.Fatalf("expected detectors line in stderr, got %q", stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "before:") {
 		t.Fatalf("expected before block in stderr, got %q", stderr.String())
@@ -46,7 +52,7 @@ func TestRunSanitizeWithIODiff(t *testing.T) {
 	if !strings.Contains(stderr.String(), "after:") {
 		t.Fatalf("expected after block in stderr, got %q", stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "[REDACTED_PRIVATE_KEY]") {
+	if !strings.Contains(stdout.String(), "---******* ******* ********") {
 		t.Fatalf("expected redaction in stdout, got %q", stdout.String())
 	}
 }

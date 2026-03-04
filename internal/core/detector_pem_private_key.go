@@ -2,8 +2,6 @@ package core
 
 import "regexp"
 
-const FindingTypePEMPrivateKey = "pem_private_key"
-
 var pemPrivateKeyPattern = regexp.MustCompile(`(?is)-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----`)
 
 type PEMPrivateKeyDetector struct {

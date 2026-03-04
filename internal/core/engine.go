@@ -20,10 +20,11 @@ func New() *Engine {
 	return NewEngine(
 		[]Detector{
 			NewPEMPrivateKeyDetector(),
+			NewJWTDetector(),
+			NewEnvSecretDetector(),
+			NewHighEntropyTokenDetector(),
 		},
-		NewReplacementRedactor(map[string]string{
-			FindingTypePEMPrivateKey: "[REDACTED_PRIVATE_KEY]",
-		}),
+		NewFormatPreservingRedactor(),
 		DefaultScoreWeights(),
 	)
 }
@@ -55,9 +56,9 @@ func NewEngine(detectors []Detector, redactor Redactor, weights ScoreWeights) *E
 
 func DefaultScoreWeights() ScoreWeights {
 	return ScoreWeights{
-		Low:    1,
-		Medium: 5,
-		High:   10,
+		Low:    2,
+		Medium: 8,
+		High:   15,
 	}
 }
 

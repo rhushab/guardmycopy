@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/rhushabhbontapalle/clipguard/internal/config"
@@ -45,7 +47,8 @@ func (s *Service) Sanitize(showDiff bool) (bool, error) {
 	}
 
 	if showDiff {
-		fmt.Printf("findings: %d score=%d risk=%s\n", len(result.Findings), result.Score, result.RiskLevel)
+		fmt.Printf("risk=%s score=%d findings=%d\n", result.RiskLevel, result.Score, len(result.Findings))
+		fmt.Printf("detectors: %s\n", strings.Join(detectorsTriggered(result.Findings), ", "))
 		fmt.Printf("before: %q\n", current)
 		fmt.Printf("after:  %q\n", result.SanitizedText)
 	}
@@ -55,6 +58,24 @@ func (s *Service) Sanitize(showDiff bool) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func detectorsTriggered(findings []core.Finding) []string {
+	if len(findings) == 0 {
+		return []string{"none"}
+	}
+
+	unique := make(map[string]struct{}, len(findings))
+	for _, finding := range findings {
+		unique[finding.Type] = struct{}{}
+	}
+
+	out := make([]string, 0, len(unique))
+	for findingType := range unique {
+		out = append(out, findingType)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (s *Service) Run(ctx context.Context, interval time.Duration) error {

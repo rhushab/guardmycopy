@@ -6,6 +6,12 @@
 
 No server, database, or network calls are used.
 
+Current detectors:
+- PEM private key blocks
+- JWT-like tokens (`header.payload.signature`)
+- Env-style secrets (`KEY=VALUE` for secret-like key names)
+- High-entropy long tokens
+
 ## Build
 
 ```bash
@@ -26,7 +32,7 @@ Sanitize text from stdin:
 cat input.txt | ./clipguard sanitize
 ```
 
-Show findings summary and before/after on stderr while writing sanitized text to stdout:
+Show findings summary, risk/score, triggered detectors, and before/after on stderr while writing sanitized text to stdout:
 
 ```bash
 cat input.txt | ./clipguard sanitize --diff

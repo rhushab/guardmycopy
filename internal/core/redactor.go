@@ -5,24 +5,13 @@ import (
 	"strings"
 )
 
-type ReplacementRedactor struct {
-	byType             map[string]string
-	defaultReplacement string
+type FormatPreservingRedactor struct{}
+
+func NewFormatPreservingRedactor() *FormatPreservingRedactor {
+	return &FormatPreservingRedactor{}
 }
 
-func NewReplacementRedactor(byType map[string]string) *ReplacementRedactor {
-	clonedByType := make(map[string]string, len(byType))
-	for findingType, replacement := range byType {
-		clonedByType[findingType] = replacement
-	}
-
-	return &ReplacementRedactor{
-		byType:             clonedByType,
-		defaultReplacement: "[REDACTED]",
-	}
-}
-
-func (r *ReplacementRedactor) Redact(text string, findings []Finding) string {
+func (r *FormatPreservingRedactor) Redact(text string, findings []Finding) string {
 	if len(findings) == 0 {
 		return text
 	}
@@ -32,7 +21,7 @@ func (r *ReplacementRedactor) Redact(text string, findings []Finding) string {
 		if sortedFindings[i].Start != sortedFindings[j].Start {
 			return sortedFindings[i].Start < sortedFindings[j].Start
 		}
-		return sortedFindings[i].End < sortedFindings[j].End
+		return sortedFindings[i].End > sortedFindings[j].End
 	})
 
 	var out strings.Builder
@@ -45,7 +34,7 @@ func (r *ReplacementRedactor) Redact(text string, findings []Finding) string {
 		}
 
 		out.WriteString(text[cursor:finding.Start])
-		out.WriteString(r.replacementFor(finding))
+		out.WriteString(r.mask(text[finding.Start:finding.End]))
 		cursor = finding.End
 	}
 
@@ -53,9 +42,40 @@ func (r *ReplacementRedactor) Redact(text string, findings []Finding) string {
 	return out.String()
 }
 
-func (r *ReplacementRedactor) replacementFor(finding Finding) string {
-	if replacement, ok := r.byType[finding.Type]; ok {
-		return replacement
+func (r *FormatPreservingRedactor) mask(secret string) string {
+	if len(secret) == 0 {
+		return secret
 	}
-	return r.defaultReplacement
+
+	keep := visibleEdge(secret)
+	if len(secret) <= keep*2 {
+		return strings.Repeat("*", len(secret))
+	}
+
+	var middle strings.Builder
+	middle.Grow(len(secret) - (keep * 2))
+
+	for i := keep; i < len(secret)-keep; i++ {
+		switch secret[i] {
+		case '\n', '\r', '\t', ' ':
+			middle.WriteByte(secret[i])
+		default:
+			middle.WriteByte('*')
+		}
+	}
+
+	return secret[:keep] + middle.String() + secret[len(secret)-keep:]
+}
+
+func visibleEdge(secret string) int {
+	switch {
+	case len(secret) >= 64:
+		return 4
+	case len(secret) >= 24:
+		return 3
+	case len(secret) >= 12:
+		return 2
+	default:
+		return 1
+	}
 }

@@ -46,7 +46,7 @@ func TestSanitizeWritesWhenChanged(t *testing.T) {
 	if clip.writes != 1 {
 		t.Fatalf("expected one write, got %d", clip.writes)
 	}
-	if clip.value != "start\n[REDACTED_PRIVATE_KEY]\nend" {
+	if clip.value != "start\n---******* ******* ********\n***\n******** ******* *****---\nend" {
 		t.Fatalf("unexpected clipboard value: %q", clip.value)
 	}
 }

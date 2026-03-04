@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -76,7 +78,8 @@ func runSanitizeWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer)
 	result := core.New().Sanitize(text)
 
 	if *showDiff {
-		fmt.Fprintf(stderr, "findings: %d score=%d risk=%s\n", len(result.Findings), result.Score, result.RiskLevel)
+		fmt.Fprintf(stderr, "risk=%s score=%d findings=%d\n", result.RiskLevel, result.Score, len(result.Findings))
+		fmt.Fprintf(stderr, "detectors: %s\n", strings.Join(detectorsTriggered(result.Findings), ", "))
 		for i, finding := range result.Findings {
 			fmt.Fprintf(
 				stderr,
@@ -99,6 +102,24 @@ func runSanitizeWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer)
 	}
 
 	return 0
+}
+
+func detectorsTriggered(findings []core.Finding) []string {
+	if len(findings) == 0 {
+		return []string{"none"}
+	}
+
+	unique := make(map[string]struct{}, len(findings))
+	for _, finding := range findings {
+		unique[finding.Type] = struct{}{}
+	}
+
+	out := make([]string, 0, len(unique))
+	for findingType := range unique {
+		out = append(out, findingType)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func runLoop(args []string) int {
