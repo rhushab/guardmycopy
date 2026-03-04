@@ -28,6 +28,11 @@ func TestJWTDetectorDetect(t *testing.T) {
 			wantCount: 0,
 		},
 		{
+			name:      "rejects dotted hostnames",
+			input:     "visit api.example.internal for docs",
+			wantCount: 0,
+		},
+		{
 			name:      "detects multiple",
 			input:     "a eyJhbGciOiJIUzI1NiJ9.eyJhIjoiYmJiYmJiYmJiYmJiYmJiYiJ9.rJ2Q2e0JxFkrGSxFJpBh7NZhNfDGhysQ b eyJhbGciOiJIUzI1NiJ9.eyJiIjoiY2NjY2NjY2NjY2NjY2NjYyJ9.s2PJv9v0jTz3N8zUUFQGJbWIKsORP1qt z",
 			wantCount: 2,

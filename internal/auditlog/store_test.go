@@ -85,3 +85,41 @@ func TestStoreTailRejectsNonPositiveCount(t *testing.T) {
 		t.Fatal("expected error for tail count <= 0")
 	}
 }
+
+func TestStoreLogSchemaDoesNotIncludeRawClipboardContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	store, err := New(path)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	if err := store.Log(Entry{
+		App:          "Terminal",
+		Score:        42,
+		RiskLevel:    "high",
+		FindingTypes: []string{"pem_private_key"},
+		Action:       "block",
+		ContentHash:  "hash-value",
+	}); err != nil {
+		t.Fatalf("Log returned error: %v", err)
+	}
+
+	lines, err := store.Tail(1)
+	if err != nil {
+		t.Fatalf("Tail returned error: %v", err)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("expected one line, got %d", len(lines))
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+
+	for _, disallowed := range []string{"clipboard", "content", "raw", "text", "sanitized"} {
+		if _, ok := payload[disallowed]; ok {
+			t.Fatalf("unexpected raw clipboard field %q in audit payload", disallowed)
+		}
+	}
+}

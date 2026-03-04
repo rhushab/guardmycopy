@@ -19,9 +19,13 @@ per_app:
   "Google Chrome":
     actions:
       med: warn
-      high: sanitize
+      high: block
     allowlist_patterns:
       - '^chrome-extension://'
+  "Slack":
+    actions:
+      med: warn
+      high: block
   "iTerm2":
     detector_toggles:
       high_entropy_token: false

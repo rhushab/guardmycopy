@@ -52,6 +52,18 @@ func TestFormatPreservingRedactor(t *testing.T) {
 			},
 			want: "KEY=AB************90",
 		},
+		{
+			name:  "preserves punctuation around secret",
+			input: "Authorization: Bearer [abcDEF1234567890xyz]",
+			findings: []Finding{
+				{
+					Type:  FindingTypeHighEntropyToken,
+					Start: len("Authorization: Bearer ["),
+					End:   len("Authorization: Bearer [abcDEF1234567890xyz]") - 1,
+				},
+			},
+			want: "Authorization: Bearer [ab***************yz]",
+		},
 	}
 
 	for _, tc := range tests {

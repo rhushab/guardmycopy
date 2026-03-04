@@ -14,6 +14,7 @@ import (
 )
 
 const defaultPollInterval = 500 * time.Millisecond
+const minPollInterval = 100 * time.Millisecond
 
 const (
 	defaultConfigDirName       = "clipguard"
@@ -42,7 +43,7 @@ per_app:
   "Google Chrome":
     actions:
       med: warn
-      high: sanitize
+      high: block
     allowlist_patterns:
       - '^chrome-extension://'
 `
@@ -107,7 +108,7 @@ func Defaults() Config {
 	weights := core.DefaultScoreWeights()
 
 	return Config{
-		PollInterval: defaultPollInterval,
+		PollInterval: NormalizePollInterval(defaultPollInterval),
 		Global: Policy{
 			Thresholds: Thresholds{
 				Med:  weights.Medium,
@@ -122,13 +123,27 @@ func Defaults() Config {
 			Actions: map[core.RiskLevel]Action{
 				core.RiskLevelLow:  ActionAllow,
 				core.RiskLevelMed:  ActionSanitize,
-				core.RiskLevelHigh: ActionSanitize,
+				core.RiskLevelHigh: ActionBlock,
 			},
 			AllowlistPatterns: nil,
 			allowlistRegex:    nil,
 		},
 		PerApp: map[string]Policy{},
 	}
+}
+
+func MinPollInterval() time.Duration {
+	return minPollInterval
+}
+
+func NormalizePollInterval(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		return defaultPollInterval
+	}
+	if interval < minPollInterval {
+		return minPollInterval
+	}
+	return interval
 }
 
 func DefaultPath() string {
@@ -183,6 +198,22 @@ func WriteDefault(path string, overwrite bool) (string, error) {
 }
 
 func Load(path string) (Config, error) {
+	cfg, err := load(path, nil)
+	return cfg, err
+}
+
+func LoadWithWarnings(path string) (Config, []string, error) {
+	warnings := make([]string, 0)
+	cfg, err := load(path, func(message string) {
+		warnings = append(warnings, message)
+	})
+	if err != nil {
+		return Config{}, warnings, err
+	}
+	return cfg, warnings, nil
+}
+
+func load(path string, warn func(string)) (Config, error) {
 	cfg := Defaults()
 
 	resolvedPath := strings.TrimSpace(path)
@@ -204,10 +235,10 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("parse config file: %w", err)
 	}
 
-	if err := applyGlobalConfig(&cfg, fromFile.Global); err != nil {
+	if err := applyGlobalConfig(&cfg, fromFile.Global, warn); err != nil {
 		return Config{}, err
 	}
-	if err := finalizePolicy(&cfg.Global); err != nil {
+	if err := finalizePolicy(&cfg.Global, "global", warn); err != nil {
 		return Config{}, fmt.Errorf("global policy: %w", err)
 	}
 
@@ -221,7 +252,7 @@ func Load(path string) (Config, error) {
 		if err := applyPolicyOverride(&policy, fromApp); err != nil {
 			return Config{}, fmt.Errorf("per_app %q: %w", appName, err)
 		}
-		if err := finalizePolicy(&policy); err != nil {
+		if err := finalizePolicy(&policy, fmt.Sprintf("per_app.%s", appName), warn); err != nil {
 			return Config{}, fmt.Errorf("per_app %q: %w", appName, err)
 		}
 		cfg.PerApp[appName] = policy
@@ -261,13 +292,26 @@ func (p Policy) IsAllowlisted(value string) bool {
 	return false
 }
 
-func applyGlobalConfig(cfg *Config, fromFile globalConfig) error {
+func applyGlobalConfig(cfg *Config, fromFile globalConfig, warn func(string)) error {
 	if fromFile.PollIntervalMS != nil {
 		if *fromFile.PollIntervalMS < 0 {
 			return errors.New("global.poll_interval_ms must be >= 0")
 		}
 		if *fromFile.PollIntervalMS > 0 {
-			cfg.PollInterval = time.Duration(*fromFile.PollIntervalMS) * time.Millisecond
+			pollInterval := time.Duration(*fromFile.PollIntervalMS) * time.Millisecond
+			normalizedInterval := NormalizePollInterval(pollInterval)
+			if normalizedInterval != pollInterval {
+				addWarning(
+					warn,
+					fmt.Sprintf(
+						"global.poll_interval_ms=%dms is below minimum %dms; using %dms",
+						*fromFile.PollIntervalMS,
+						MinPollInterval().Milliseconds(),
+						normalizedInterval.Milliseconds(),
+					),
+				)
+			}
+			cfg.PollInterval = normalizedInterval
 		}
 	}
 
@@ -311,7 +355,7 @@ func applyPolicyOverride(policy *Policy, fromFile policyFile) error {
 	return nil
 }
 
-func finalizePolicy(policy *Policy) error {
+func finalizePolicy(policy *Policy, scope string, warn func(string)) error {
 	if policy.Thresholds.Med <= 0 {
 		return errors.New("thresholds.med must be > 0")
 	}
@@ -320,20 +364,35 @@ func finalizePolicy(policy *Policy) error {
 	}
 
 	regexList := make([]*regexp.Regexp, 0, len(policy.AllowlistPatterns))
+	validPatterns := make([]string, 0, len(policy.AllowlistPatterns))
 	for _, expression := range policy.AllowlistPatterns {
 		pattern := strings.TrimSpace(expression)
 		if pattern == "" {
-			return errors.New("allowlist_patterns cannot contain empty values")
+			addWarning(warn, fmt.Sprintf("%s: empty allowlist pattern ignored", scope))
+			continue
 		}
 		compiled, err := regexp.Compile(pattern)
 		if err != nil {
-			return fmt.Errorf("invalid allowlist regex %q: %w", pattern, err)
+			addWarning(
+				warn,
+				fmt.Sprintf("%s: invalid allowlist regex %q ignored (%v)", scope, pattern, err),
+			)
+			continue
 		}
 		regexList = append(regexList, compiled)
+		validPatterns = append(validPatterns, pattern)
 	}
 
+	policy.AllowlistPatterns = validPatterns
 	policy.allowlistRegex = regexList
 	return nil
+}
+
+func addWarning(warn func(string), message string) {
+	if warn == nil {
+		return
+	}
+	warn(message)
 }
 
 func clonePolicy(policy Policy) Policy {

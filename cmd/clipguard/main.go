@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -21,7 +23,7 @@ import (
 	"github.com/rhushabhbontapalle/clipguard/internal/userstate"
 )
 
-const version = "0.7.0"
+const version = "1.0.0-rc1"
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -149,8 +151,10 @@ func runSanitizeWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer)
 				finding.Label,
 			)
 		}
-		fmt.Fprintf(stderr, "before:\n%s\n", text)
-		fmt.Fprintf(stderr, "after:\n%s\n", result.SanitizedText)
+		safeBefore := core.NewFormatPreservingRedactor().Redact(text, result.Findings)
+		fmt.Fprintf(stderr, "input_hash=%s sanitized_hash=%s\n", hashString(text), hashString(result.SanitizedText))
+		fmt.Fprintf(stderr, "before(redacted):\n%s\n", safeBefore)
+		fmt.Fprintf(stderr, "after(redacted):\n%s\n", result.SanitizedText)
 	}
 
 	if _, err := io.WriteString(stdout, result.SanitizedText); err != nil {
@@ -206,16 +210,28 @@ func runLoop(args []string) int {
 		return 2
 	}
 
-	cfg, err := config.Load(*configPath)
+	cfg, warnings, err := config.LoadWithWarnings(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
 		return 1
 	}
+	printWarnings(os.Stderr, warnings)
 
 	interval := cfg.PollInterval
 	if *intervalMS > 0 {
 		interval = time.Duration(*intervalMS) * time.Millisecond
 	}
+	normalizedInterval := config.NormalizePollInterval(interval)
+	if normalizedInterval != interval {
+		fmt.Fprintf(
+			os.Stderr,
+			"warning: --interval %dms is below minimum %dms; using %dms\n",
+			interval.Milliseconds(),
+			config.MinPollInterval().Milliseconds(),
+			normalizedInterval.Milliseconds(),
+		)
+	}
+	interval = normalizedInterval
 
 	adapters, err := platform.Select()
 	if err != nil {
@@ -277,11 +293,12 @@ func runOnce(args []string) int {
 		return 2
 	}
 
-	cfg, err := config.Load(*configPath)
+	cfg, warnings, err := config.LoadWithWarnings(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
 		return 1
 	}
+	printWarnings(os.Stderr, warnings)
 
 	adapters, err := platform.Select()
 	if err != nil {
@@ -566,7 +583,7 @@ func printRunUsage(w io.Writer) {
   clipguard run [--interval ms] [--config path] [--once] [--verbose] [--audit-log]
 
 Options:
-  --interval ms  poll interval in milliseconds (defaults to config)
+  --interval ms  poll interval in milliseconds (defaults to config, minimum 100)
   --config path  path to YAML config file (optional)
   --once         scan current clipboard once and print the decision
   --verbose      print reasoning for decisions
@@ -613,4 +630,15 @@ Options:
 Default path:
   %s
 `, config.DefaultPath())
+}
+
+func printWarnings(w io.Writer, warnings []string) {
+	for _, warning := range warnings {
+		_, _ = fmt.Fprintf(w, "warning: %s\n", warning)
+	}
+}
+
+func hashString(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }

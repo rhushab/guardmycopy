@@ -69,9 +69,7 @@ func NewWithDependencies(
 	notifier platform.Notifier,
 ) *Service {
 	defaults := config.Defaults()
-	if cfg.PollInterval <= 0 {
-		cfg.PollInterval = defaults.PollInterval
-	}
+	cfg.PollInterval = config.NormalizePollInterval(cfg.PollInterval)
 	if cfg.PerApp == nil {
 		cfg.PerApp = map[string]config.Policy{}
 	}
@@ -150,6 +148,11 @@ func (s *Service) Sanitize(showDiff bool) (bool, error) {
 	decision, result := s.decide(current)
 
 	if showDiff {
+		safeBefore := s.redactForDisplay(current, result.Findings)
+		safeAfter := s.redactForDisplay(
+			s.resultingClipboard(decision.Action, current, result.SanitizedText),
+			result.Findings,
+		)
 		fmt.Printf(
 			"app=%q action=%s risk=%s score=%d findings=%d\n",
 			decision.ActiveAppName,
@@ -159,8 +162,8 @@ func (s *Service) Sanitize(showDiff bool) (bool, error) {
 			len(result.Findings),
 		)
 		fmt.Printf("detectors: %s\n", strings.Join(detectorsTriggered(result.Findings), ", "))
-		fmt.Printf("before: %q\n", current)
-		fmt.Printf("after:  %q\n", s.resultingClipboard(decision.Action, current, result.SanitizedText))
+		fmt.Printf("before(redacted): %q\n", safeBefore)
+		fmt.Printf("after(redacted):  %q\n", safeAfter)
 	}
 
 	changed, _, err := s.applyAction(decision, current, result.SanitizedText, hashText(current))
@@ -197,6 +200,7 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 	if interval <= 0 {
 		interval = s.cfg.PollInterval
 	}
+	interval = config.NormalizePollInterval(interval)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -562,4 +566,11 @@ func (s *Service) decisionReasoning(decision PolicyDecision, result policyResult
 		fmt.Sprintf("detectors=%s", strings.Join(detectorsTriggered(result.Findings), ",")),
 		fmt.Sprintf("policy resolved action=%s for risk=%s", decision.Action, decision.RiskLevel),
 	}
+}
+
+func (s *Service) redactForDisplay(value string, findings []core.Finding) string {
+	if len(findings) == 0 {
+		return value
+	}
+	return s.redactor.Redact(value, findings)
 }

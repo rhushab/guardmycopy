@@ -15,8 +15,8 @@ func TestPolicyResolverUsesThresholdsFromScore(t *testing.T) {
 	if decision.RiskLevel != core.RiskLevelHigh {
 		t.Fatalf("unexpected risk level: got %q want %q", decision.RiskLevel, core.RiskLevelHigh)
 	}
-	if decision.Action != config.ActionSanitize {
-		t.Fatalf("unexpected action: got %q want %q", decision.Action, config.ActionSanitize)
+	if decision.Action != config.ActionBlock {
+		t.Fatalf("unexpected action: got %q want %q", decision.Action, config.ActionBlock)
 	}
 }
 

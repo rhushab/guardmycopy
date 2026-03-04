@@ -67,11 +67,14 @@ func TestRunSanitizeWithIODiff(t *testing.T) {
 	if !strings.Contains(stderr.String(), "detectors: pem_private_key") {
 		t.Fatalf("expected detectors line in stderr, got %q", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "before:") {
+	if !strings.Contains(stderr.String(), "before(redacted):") {
 		t.Fatalf("expected before block in stderr, got %q", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "after:") {
+	if !strings.Contains(stderr.String(), "after(redacted):") {
 		t.Fatalf("expected after block in stderr, got %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "input_hash=") {
+		t.Fatalf("expected input hash in stderr, got %q", stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "---******* ******* ********") {
 		t.Fatalf("expected redaction in stdout, got %q", stdout.String())
@@ -104,8 +107,8 @@ func TestRunOnceWithServicePrintsDecision(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("expected empty stderr, got %q", stderr.String())
 	}
-	if !strings.Contains(stdout.String(), `action=sanitize`) {
-		t.Fatalf("expected sanitize action in output, got %q", stdout.String())
+	if !strings.Contains(stdout.String(), `action=block`) {
+		t.Fatalf("expected block action in output, got %q", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), `risk=high`) {
 		t.Fatalf("expected high risk in output, got %q", stdout.String())

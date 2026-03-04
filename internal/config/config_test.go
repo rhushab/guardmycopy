@@ -23,7 +23,7 @@ func TestLoadDefaultsWhenDefaultFileMissing(t *testing.T) {
 	if !cfg.Global.DetectorEnabled(core.FindingTypeJWT) {
 		t.Fatal("expected jwt detector enabled by default")
 	}
-	if cfg.Global.ActionForRisk(core.RiskLevelHigh) != ActionSanitize {
+	if cfg.Global.ActionForRisk(core.RiskLevelHigh) != ActionBlock {
 		t.Fatalf("unexpected default action: %q", cfg.Global.ActionForRisk(core.RiskLevelHigh))
 	}
 }
@@ -127,7 +127,7 @@ func TestLoadRejectsNegativeInterval(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsInvalidAllowlistRegex(t *testing.T) {
+func TestLoadWithWarningsSkipsInvalidAllowlistRegex(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "clipguard.yaml")
 
@@ -135,8 +135,35 @@ func TestLoadRejectsInvalidAllowlistRegex(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	if _, err := Load(path); err == nil {
-		t.Fatal("expected regex validation error")
+	cfg, warnings, err := LoadWithWarnings(path)
+	if err != nil {
+		t.Fatalf("LoadWithWarnings returned error: %v", err)
+	}
+	if len(warnings) == 0 {
+		t.Fatal("expected warning for invalid allowlist regex")
+	}
+	if cfg.Global.IsAllowlisted("anything") {
+		t.Fatal("expected invalid allowlist regex to be ignored")
+	}
+}
+
+func TestLoadWithWarningsClampsLowPollInterval(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "clipguard.yaml")
+
+	if err := os.WriteFile(path, []byte("global:\n  poll_interval_ms: 1\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, warnings, err := LoadWithWarnings(path)
+	if err != nil {
+		t.Fatalf("LoadWithWarnings returned error: %v", err)
+	}
+	if cfg.PollInterval != MinPollInterval() {
+		t.Fatalf("expected poll interval to be clamped to %s, got %s", MinPollInterval(), cfg.PollInterval)
+	}
+	if len(warnings) == 0 {
+		t.Fatal("expected warning for low poll interval")
 	}
 }
 

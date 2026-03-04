@@ -87,8 +87,11 @@ func (m *mockAuditLogStore) Log(entry auditlog.Entry) error {
 }
 
 func TestSanitizeWritesWhenChanged(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Global.Actions[core.RiskLevelHigh] = config.ActionSanitize
+
 	clip := &mockClipboard{value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"}
-	svc := New(config.Defaults(), clip)
+	svc := New(cfg, clip)
 
 	changed, err := svc.Sanitize(false)
 	if err != nil {
@@ -197,8 +200,8 @@ func TestScanCurrentReportsDecision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanCurrent returned error: %v", err)
 	}
-	if decision.Action != config.ActionSanitize {
-		t.Fatalf("expected sanitize action, got %s", decision.Action)
+	if decision.Action != config.ActionBlock {
+		t.Fatalf("expected block action, got %s", decision.Action)
 	}
 	if decision.RiskLevel != core.RiskLevelHigh {
 		t.Fatalf("expected high risk level, got %s", decision.RiskLevel)
@@ -424,7 +427,7 @@ func TestScanCurrentDetailedWritesAuditEntry(t *testing.T) {
 	if entry.RiskLevel != string(core.RiskLevelHigh) {
 		t.Fatalf("unexpected risk level: %q", entry.RiskLevel)
 	}
-	if entry.Action != string(config.ActionSanitize) {
+	if entry.Action != string(config.ActionBlock) {
 		t.Fatalf("unexpected action: %q", entry.Action)
 	}
 	if len(entry.FindingTypes) != 1 || entry.FindingTypes[0] != core.FindingTypePEMPrivateKey {

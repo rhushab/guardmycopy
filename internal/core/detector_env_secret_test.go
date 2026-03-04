@@ -40,6 +40,11 @@ func TestEnvSecretDetectorDetect(t *testing.T) {
 			wantCount: 0,
 		},
 		{
+			name:      "ignores shell placeholder values",
+			input:     "API_KEY=$TOKEN",
+			wantCount: 0,
+		},
+		{
 			name:       "detects multiple values",
 			input:      "TOKEN=AAAAaaaa1111bbbb2222\nPASSWORD=ZzYyXxWwVvUu1122334455",
 			wantCount:  2,

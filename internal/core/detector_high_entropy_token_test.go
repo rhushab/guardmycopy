@@ -33,6 +33,12 @@ func TestHighEntropyTokenDetectorDetect(t *testing.T) {
 			wantCount: 0,
 		},
 		{
+			name:      "detects token with symbol set diversity",
+			input:     "token: Ab9d_2Kp-7QxY4mN8sT1vW6zR3cL0hJ",
+			wantCount: 1,
+			wantToken: "Ab9d_2Kp-7QxY4mN8sT1vW6zR3cL0hJ",
+		},
+		{
 			name:      "skips candidates inside PEM blocks",
 			input:     "-----BEGIN PRIVATE KEY-----\na9Fz2LmQ7rTy8UoP4nVw6XcD3sKe1JhM\n-----END PRIVATE KEY-----",
 			wantCount: 0,
