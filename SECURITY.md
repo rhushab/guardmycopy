@@ -14,11 +14,11 @@ Use synthetic examples.
 
 ## Security Posture Notes
 
-- clipguard is macOS-only.
-- clipguard is local-only and should not perform network calls.
+- guardmycopy is macOS-only.
+- guardmycopy is local-only and should not perform network calls.
 - Optional audit logs must remain hash+metadata only (no raw clipboard text).
 
 ## Scope Limitations
 
-clipguard helps reduce accidental clipboard leaks but is not a complete endpoint security product.
+guardmycopy helps reduce accidental clipboard leaks but is not a complete endpoint security product.
 Compromise of the host system or user account can bypass clipboard safeguards.

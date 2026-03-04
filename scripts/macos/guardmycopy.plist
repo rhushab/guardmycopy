@@ -1,28 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-Template LaunchAgent for clipguard.
+Template LaunchAgent for guardmycopy.
 
 Manual setup (not automatic):
-1) Copy this file to ~/Library/LaunchAgents/com.clipguard.agent.plist
-2) Replace __CLIPGUARD_BIN__ with the absolute path to the clipguard binary.
+1) Copy this file to ~/Library/LaunchAgents/com.guardmycopy.agent.plist
+2) Replace __GUARDMYCOPY_BIN__ with the absolute path to the guardmycopy binary.
 3) Replace __WORKDIR__ with your project directory.
 4) Replace __LOG_DIR__ with a writable directory for logs.
-5) Load it: launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.clipguard.agent.plist
-6) Verify: launchctl print gui/$(id -u)/com.clipguard.agent
+5) Load it: launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.guardmycopy.agent.plist
+6) Verify: launchctl print gui/$(id -u)/com.guardmycopy.agent
 
 Disable/remove:
-- launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.clipguard.agent.plist
-- rm ~/Library/LaunchAgents/com.clipguard.agent.plist
+- launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.guardmycopy.agent.plist
+- rm ~/Library/LaunchAgents/com.guardmycopy.agent.plist
 -->
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.clipguard.agent</string>
+  <string>com.guardmycopy.agent</string>
 
   <key>ProgramArguments</key>
   <array>
-    <string>__CLIPGUARD_BIN__</string>
+    <string>__GUARDMYCOPY_BIN__</string>
     <string>run</string>
     <string>--interval</string>
     <string>500</string>
@@ -38,9 +38,9 @@ Disable/remove:
   <true/>
 
   <key>StandardOutPath</key>
-  <string>__LOG_DIR__/clipguard.out.log</string>
+  <string>__LOG_DIR__/guardmycopy.out.log</string>
 
   <key>StandardErrorPath</key>
-  <string>__LOG_DIR__/clipguard.err.log</string>
+  <string>__LOG_DIR__/guardmycopy.err.log</string>
 </dict>
 </plist>

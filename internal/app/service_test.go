@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rhushabhbontapalle/clipguard/internal/auditlog"
-	"github.com/rhushabhbontapalle/clipguard/internal/config"
-	"github.com/rhushabhbontapalle/clipguard/internal/core"
-	"github.com/rhushabhbontapalle/clipguard/internal/userstate"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/auditlog"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/config"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/core"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/userstate"
 )
 
 type mockClipboard struct {
@@ -216,7 +216,7 @@ func TestScanCurrentReportsDecision(t *testing.T) {
 
 func TestScanCurrentTreatsClipboardAllowlistAsAllow(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "clipguard.yaml")
+	path := filepath.Join(dir, "guardmycopy.yaml")
 
 	content := `global:
   allowlist_patterns:

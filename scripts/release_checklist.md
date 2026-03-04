@@ -19,16 +19,16 @@ make ci
 Then run a manual macOS smoke test:
 
 ```bash
-go build -o ./clipguard ./cmd/clipguard
-./clipguard once --verbose
-./clipguard run --once --verbose
+go build -o ./guardmycopy ./cmd/guardmycopy
+./guardmycopy once --verbose
+./guardmycopy run --once --verbose
 ```
 
 Optional audit-log validation:
 
 ```bash
-./clipguard once --audit-log
-./clipguard log --tail 5
+./guardmycopy once --audit-log
+./guardmycopy log --tail 5
 ```
 
 Confirm no raw clipboard content appears in audit logs.

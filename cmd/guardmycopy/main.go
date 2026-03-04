@@ -15,12 +15,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rhushabhbontapalle/clipguard/internal/app"
-	"github.com/rhushabhbontapalle/clipguard/internal/auditlog"
-	"github.com/rhushabhbontapalle/clipguard/internal/config"
-	"github.com/rhushabhbontapalle/clipguard/internal/core"
-	"github.com/rhushabhbontapalle/clipguard/internal/platform"
-	"github.com/rhushabhbontapalle/clipguard/internal/userstate"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/app"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/auditlog"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/config"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/core"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/platform"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/userstate"
 )
 
 const version = "1.0.0-rc1"
@@ -541,7 +541,7 @@ func runConfigInitWithIO(args []string, stdout, stderr io.Writer, defaultPathOve
 
 func printUsage(w io.Writer) {
 	_, _ = fmt.Fprintf(w, `Usage:
-  clipguard <command> [options]
+  guardmycopy <command> [options]
 
 Commands:
   sanitize    redact sensitive spans from stdin
@@ -550,10 +550,10 @@ Commands:
   snooze      disable enforcement for a duration (for example: 5m)
   allow-once  bypass enforcement for the next clipboard event
   log         print recent audit log entries
-  config      manage clipguard config files
+  config      manage guardmycopy config files
   version     print CLI version
 
-Run "clipguard help <command>" for command-specific usage.
+Run "guardmycopy help <command>" for command-specific usage.
 
 Default config path:
   %s
@@ -562,7 +562,7 @@ Default config path:
 
 func printSanitizeUsage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, `Usage:
-  clipguard sanitize [--diff] < input.txt
+  guardmycopy sanitize [--diff] < input.txt
 
 Options:
   --diff  print findings summary and before/after to stderr`)
@@ -570,7 +570,7 @@ Options:
 
 func printOnceUsage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, `Usage:
-  clipguard once [--config path] [--verbose] [--audit-log]
+  guardmycopy once [--config path] [--verbose] [--audit-log]
 
 Options:
   --config path  path to YAML config file (optional)
@@ -580,7 +580,7 @@ Options:
 
 func printRunUsage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, `Usage:
-  clipguard run [--interval ms] [--config path] [--once] [--verbose] [--audit-log]
+  guardmycopy run [--interval ms] [--config path] [--once] [--verbose] [--audit-log]
 
 Options:
   --interval ms  poll interval in milliseconds (defaults to config, minimum 100)
@@ -592,20 +592,20 @@ Options:
 
 func printSnoozeUsage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, `Usage:
-  clipguard snooze <duration>
+  guardmycopy snooze <duration>
 
 Example:
-  clipguard snooze 5m`)
+  guardmycopy snooze 5m`)
 }
 
 func printAllowOnceUsage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, `Usage:
-  clipguard allow-once`)
+  guardmycopy allow-once`)
 }
 
 func printLogUsage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, `Usage:
-  clipguard log [--tail N]
+  guardmycopy log [--tail N]
 
 Options:
   --tail N  print the last N audit log entries (default: 50)`)
@@ -613,7 +613,7 @@ Options:
 
 func printConfigUsage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, `Usage:
-  clipguard config <subcommand> [options]
+  guardmycopy config <subcommand> [options]
 
 Subcommands:
   init  write a default config file`)
@@ -621,7 +621,7 @@ Subcommands:
 
 func printConfigInitUsage(w io.Writer) {
 	_, _ = fmt.Fprintf(w, `Usage:
-  clipguard config init [--force] [--path file]
+  guardmycopy config init [--force] [--path file]
 
 Options:
   --force      overwrite an existing config file

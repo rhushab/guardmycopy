@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for contributing to clipguard.
+Thanks for contributing to guardmycopy.
 
 ## Development Requirements
 

@@ -67,12 +67,12 @@ All notable changes to this project will be documented in this file.
 - Initial project scaffold
 - PEM private key detection
 
-[1.0.0-rc1]: https://github.com/rhushabhbontapalle/clipguard/releases/tag/v1.0.0-rc1
-[0.8]: https://github.com/rhushabhbontapalle/clipguard/releases/tag/v0.8
-[0.7]: https://github.com/rhushabhbontapalle/clipguard/releases/tag/v0.7
-[0.6]: https://github.com/rhushabhbontapalle/clipguard/releases/tag/v0.6
-[0.5]: https://github.com/rhushabhbontapalle/clipguard/releases/tag/v0.5
-[0.4]: https://github.com/rhushabhbontapalle/clipguard/releases/tag/v0.4
-[0.3]: https://github.com/rhushabhbontapalle/clipguard/releases/tag/v0.3
-[0.2]: https://github.com/rhushabhbontapalle/clipguard/releases/tag/v0.2
-[0.1]: https://github.com/rhushabhbontapalle/clipguard/releases/tag/v0.1
+[1.0.0-rc1]: https://github.com/rhushabhbontapalle/guardmycopy/releases/tag/v1.0.0-rc1
+[0.8]: https://github.com/rhushabhbontapalle/guardmycopy/releases/tag/v0.8
+[0.7]: https://github.com/rhushabhbontapalle/guardmycopy/releases/tag/v0.7
+[0.6]: https://github.com/rhushabhbontapalle/guardmycopy/releases/tag/v0.6
+[0.5]: https://github.com/rhushabhbontapalle/guardmycopy/releases/tag/v0.5
+[0.4]: https://github.com/rhushabhbontapalle/guardmycopy/releases/tag/v0.4
+[0.3]: https://github.com/rhushabhbontapalle/guardmycopy/releases/tag/v0.3
+[0.2]: https://github.com/rhushabhbontapalle/guardmycopy/releases/tag/v0.2
+[0.1]: https://github.com/rhushabhbontapalle/guardmycopy/releases/tag/v0.1

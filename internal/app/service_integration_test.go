@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rhushabhbontapalle/clipguard/internal/config"
-	"github.com/rhushabhbontapalle/clipguard/internal/core"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/config"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/core"
 )
 
 type mockForegroundApp struct {

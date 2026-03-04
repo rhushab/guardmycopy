@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rhushabhbontapalle/clipguard/internal/app"
-	"github.com/rhushabhbontapalle/clipguard/internal/auditlog"
-	"github.com/rhushabhbontapalle/clipguard/internal/config"
-	"github.com/rhushabhbontapalle/clipguard/internal/userstate"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/app"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/auditlog"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/config"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/userstate"
 )
 
 type testClipboard struct {
@@ -241,7 +241,7 @@ func TestRunLogWithIORejectsInvalidTail(t *testing.T) {
 }
 
 func TestRunConfigInitWithIOWritesDefaultConfig(t *testing.T) {
-	defaultPath := filepath.Join(t.TempDir(), "clipguard", "config.yaml")
+	defaultPath := filepath.Join(t.TempDir(), "guardmycopy", "config.yaml")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -278,7 +278,7 @@ func TestRunConfigInitWithIORejectsPositionalArgs(t *testing.T) {
 }
 
 func TestRunConfigInitWithIOExistingFileRequiresForce(t *testing.T) {
-	defaultPath := filepath.Join(t.TempDir(), "clipguard", "config.yaml")
+	defaultPath := filepath.Join(t.TempDir(), "guardmycopy", "config.yaml")
 	if _, err := config.WriteDefault(defaultPath, false); err != nil {
 		t.Fatalf("WriteDefault returned error: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestRunHelpConfigInit(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("expected empty stderr, got %q", stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "clipguard config init") {
+	if !strings.Contains(stdout.String(), "guardmycopy config init") {
 		t.Fatalf("expected config init usage in stdout, got %q", stdout.String())
 	}
 }

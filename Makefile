@@ -1,5 +1,5 @@
-APP := clipguard
-CMD := ./cmd/clipguard
+APP := guardmycopy
+CMD := ./cmd/guardmycopy
 GO ?= go
 
 .PHONY: fmt fmt-check vet lint test build run ci

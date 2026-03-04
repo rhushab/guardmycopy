@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rhushabhbontapalle/clipguard/internal/core"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/core"
 )
 
 func TestLoadDefaultsWhenDefaultFileMissing(t *testing.T) {
@@ -30,7 +30,7 @@ func TestLoadDefaultsWhenDefaultFileMissing(t *testing.T) {
 
 func TestLoadFromYAML(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "clipguard.yaml")
+	path := filepath.Join(dir, "guardmycopy.yaml")
 
 	content := `global:
   poll_interval_ms: 1250
@@ -116,7 +116,7 @@ per_app:
 
 func TestLoadRejectsNegativeInterval(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "clipguard.yaml")
+	path := filepath.Join(dir, "guardmycopy.yaml")
 
 	if err := os.WriteFile(path, []byte("global:\n  poll_interval_ms: -1\n"), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -129,7 +129,7 @@ func TestLoadRejectsNegativeInterval(t *testing.T) {
 
 func TestLoadWithWarningsSkipsInvalidAllowlistRegex(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "clipguard.yaml")
+	path := filepath.Join(dir, "guardmycopy.yaml")
 
 	if err := os.WriteFile(path, []byte("global:\n  allowlist_patterns:\n    - \"[invalid\"\n"), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -149,7 +149,7 @@ func TestLoadWithWarningsSkipsInvalidAllowlistRegex(t *testing.T) {
 
 func TestLoadWithWarningsClampsLowPollInterval(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "clipguard.yaml")
+	path := filepath.Join(dir, "guardmycopy.yaml")
 
 	if err := os.WriteFile(path, []byte("global:\n  poll_interval_ms: 1\n"), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -169,7 +169,7 @@ func TestLoadWithWarningsClampsLowPollInterval(t *testing.T) {
 
 func TestLoadRejectsUnsupportedAction(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "clipguard.yaml")
+	path := filepath.Join(dir, "guardmycopy.yaml")
 
 	if err := os.WriteFile(path, []byte("global:\n  actions:\n    high: panic\n"), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)

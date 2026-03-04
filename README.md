@@ -1,6 +1,6 @@
-# clipguard
+# guardmycopy
 
-`clipguard` is a macOS-only clipboard firewall written in Go.
+`guardmycopy` is a macOS-only clipboard firewall written in Go.
 It continuously scans clipboard text for likely secrets and applies policy actions per risk level and foreground app.
 
 ## Scope
@@ -27,7 +27,7 @@ What it does not do:
 
 ## Threat Model
 
-`clipguard` is intended to reduce accidental copy/paste leaks of sensitive text from local user workflows.
+`guardmycopy` is intended to reduce accidental copy/paste leaks of sensitive text from local user workflows.
 
 In scope:
 - Accidental paste of secrets copied in browsers, chat apps, terminals, editors
@@ -52,25 +52,25 @@ Out of scope:
 ### Build
 
 ```bash
-go build -o ./clipguard ./cmd/clipguard
+go build -o ./guardmycopy ./cmd/guardmycopy
 ```
 
 ### Initialize config
 
 ```bash
-./clipguard config init
+./guardmycopy config init
 ```
 
 ### Run once (decision only)
 
 ```bash
-./clipguard once --verbose
+./guardmycopy once --verbose
 ```
 
 ### Run continuous protection
 
 ```bash
-./clipguard run
+./guardmycopy run
 ```
 
 Notes:
@@ -80,8 +80,8 @@ Notes:
 ## Install (local)
 
 ```bash
-go build -o ./clipguard ./cmd/clipguard
-install -m 0755 ./clipguard /usr/local/bin/clipguard
+go build -o ./guardmycopy ./cmd/guardmycopy
+install -m 0755 ./guardmycopy /usr/local/bin/guardmycopy
 ```
 
 ## Example Configuration
@@ -126,35 +126,35 @@ per_app:
 1. Build:
 
 ```bash
-go build -o ./clipguard ./cmd/clipguard
+go build -o ./guardmycopy ./cmd/guardmycopy
 ```
 
 2. Copy a known sensitive sample and run once:
 
 ```bash
 printf '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n' | pbcopy
-./clipguard once --verbose
+./guardmycopy once --verbose
 ```
 
 3. Run the loop and trigger policy actions:
 
 ```bash
-./clipguard run --interval 250
+./guardmycopy run --interval 250
 ```
 
 4. Optional audit log mode:
 
 ```bash
-./clipguard run --audit-log
-./clipguard log --tail 20
+./guardmycopy run --audit-log
+./guardmycopy log --tail 20
 ```
 
 Expected audit location:
-- `$(os.UserConfigDir)/clipguard/audit.jsonl`
+- `$(os.UserConfigDir)/guardmycopy/audit.jsonl`
 
 ## Troubleshooting
 
-- `unsupported OS`: clipguard runs only on macOS.
+- `unsupported OS`: guardmycopy runs only on macOS.
 - `osascript active app failed`: grant Accessibility permission to your terminal/app.
 - `load config`: invalid YAML or invalid policy keys; fix config and rerun.
 - Polling too aggressive warning: raise `poll_interval_ms` to `>=100`.

@@ -10,15 +10,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rhushabhbontapalle/clipguard/internal/auditlog"
-	"github.com/rhushabhbontapalle/clipguard/internal/config"
-	"github.com/rhushabhbontapalle/clipguard/internal/core"
-	"github.com/rhushabhbontapalle/clipguard/internal/platform"
-	"github.com/rhushabhbontapalle/clipguard/internal/userstate"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/auditlog"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/config"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/core"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/platform"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/userstate"
 )
 
 const (
-	blockedClipboardValue = "[CLIPGUARD BLOCKED]"
+	blockedClipboardValue = "[GUARDMYCOPY BLOCKED]"
 	alertDebounceWindow   = time.Second
 )
 
@@ -439,21 +439,21 @@ func (s *Service) shouldNotify(clipboardHash [32]byte) bool {
 func notificationForAction(decision PolicyDecision, appLabel string) (title, message string) {
 	switch decision.Action {
 	case config.ActionWarn:
-		return "Clipguard warning", fmt.Sprintf(
+		return "guardmycopy warning", fmt.Sprintf(
 			"Sensitive clipboard content detected in %s (risk=%s score=%d)",
 			appLabel,
 			decision.RiskLevel,
 			decision.Score,
 		)
 	case config.ActionBlock:
-		return "Clipguard blocked", fmt.Sprintf(
+		return "guardmycopy blocked", fmt.Sprintf(
 			"Clipboard content blocked in %s (risk=%s score=%d)",
 			appLabel,
 			decision.RiskLevel,
 			decision.Score,
 		)
 	default:
-		return "Clipguard sanitized", fmt.Sprintf(
+		return "guardmycopy sanitized", fmt.Sprintf(
 			"Clipboard content sanitized in %s (risk=%s score=%d)",
 			appLabel,
 			decision.RiskLevel,

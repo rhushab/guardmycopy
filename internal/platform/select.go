@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/rhushabhbontapalle/clipguard/internal/platform/darwin"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/platform/darwin"
 )
 
 type Adapters struct {
@@ -16,7 +16,7 @@ type Adapters struct {
 func Select() (Adapters, error) {
 	if runtime.GOOS != "darwin" {
 		return Adapters{}, fmt.Errorf(
-			"unsupported OS %q: clipguard currently supports macOS (darwin) only",
+			"unsupported OS %q: guardmycopy currently supports macOS (darwin) only",
 			runtime.GOOS,
 		)
 	}

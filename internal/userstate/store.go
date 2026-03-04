@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	defaultStateDirName  = "clipguard"
+	defaultStateDirName  = "guardmycopy"
 	defaultStateFileName = "state.json"
 )
 

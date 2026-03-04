@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rhushabhbontapalle/clipguard/internal/core"
+	"github.com/rhushabhbontapalle/guardmycopy/internal/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -17,9 +17,9 @@ const defaultPollInterval = 500 * time.Millisecond
 const minPollInterval = 100 * time.Millisecond
 
 const (
-	defaultConfigDirName       = "clipguard"
+	defaultConfigDirName       = "guardmycopy"
 	defaultConfigFileName      = "config.yaml"
-	legacyDefaultConfigDirName = ".config/clipguard"
+	legacyDefaultConfigDirName = ".config/guardmycopy"
 	defaultConfigDirMode       = 0o755
 	defaultConfigFileMode      = 0o644
 	defaultConfigTemplate      = `global:

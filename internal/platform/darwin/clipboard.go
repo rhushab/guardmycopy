@@ -72,7 +72,7 @@ func (n *Notifier) Notify(title, body string) error {
 	script := fmt.Sprintf(
 		"display notification %s with title %s",
 		strconv.Quote(displayBody),
-		strconv.Quote("Clipguard"),
+		strconv.Quote("guardmycopy"),
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)

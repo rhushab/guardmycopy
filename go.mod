@@ -1,4 +1,4 @@
-module github.com/rhushabhbontapalle/clipguard
+module github.com/rhushabhbontapalle/guardmycopy
 
 go 1.22
 

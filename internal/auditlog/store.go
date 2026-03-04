@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	defaultAuditDirName  = "clipguard"
+	defaultAuditDirName  = "guardmycopy"
 	defaultAuditFileName = "audit.jsonl"
 )
 
