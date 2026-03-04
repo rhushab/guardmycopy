@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,14 +13,30 @@ import (
 	"github.com/rhushabhbontapalle/clipguard/internal/platform"
 )
 
+const (
+	blockedClipboardValue = "[CLIPGUARD BLOCKED]"
+	alertDebounceWindow   = time.Second
+)
+
+type ScanDecision struct {
+	ActiveAppName string
+	Score         int
+	RiskLevel     core.RiskLevel
+	Action        config.Action
+	Findings      int
+}
+
 type Service struct {
-	cfg            config.Config
-	clipboard      platform.Clipboard
-	engine         *core.Engine
-	redactor       core.Redactor
-	policyResolver *PolicyResolver
-	foregroundApp  platform.ForegroundApp
-	notifier       platform.Notifier
+	cfg             config.Config
+	clipboard       platform.Clipboard
+	engine          *core.Engine
+	redactor        core.Redactor
+	policyResolver  *PolicyResolver
+	foregroundApp   platform.ForegroundApp
+	notifier        platform.Notifier
+	alertDebounce   time.Duration
+	lastAlertByHash map[[32]byte]time.Time
+	timeNow         func() time.Time
 }
 
 func New(cfg config.Config, clipboard platform.Clipboard) *Service {
@@ -53,14 +70,33 @@ func NewWithDependencies(
 	}
 
 	return &Service{
-		cfg:            cfg,
-		clipboard:      clipboard,
-		engine:         core.New(),
-		redactor:       core.NewFormatPreservingRedactor(),
-		policyResolver: NewPolicyResolver(cfg),
-		foregroundApp:  foregroundApp,
-		notifier:       notifier,
+		cfg:             cfg,
+		clipboard:       clipboard,
+		engine:          core.New(),
+		redactor:        core.NewFormatPreservingRedactor(),
+		policyResolver:  NewPolicyResolver(cfg),
+		foregroundApp:   foregroundApp,
+		notifier:        notifier,
+		alertDebounce:   alertDebounceWindow,
+		lastAlertByHash: make(map[[32]byte]time.Time),
+		timeNow:         time.Now,
 	}
+}
+
+func (s *Service) ScanCurrent() (ScanDecision, error) {
+	current, err := s.clipboard.ReadText()
+	if err != nil {
+		return ScanDecision{}, fmt.Errorf("read clipboard: %w", err)
+	}
+
+	decision, result := s.decide(current)
+	return ScanDecision{
+		ActiveAppName: decision.ActiveAppName,
+		Score:         decision.Score,
+		RiskLevel:     decision.RiskLevel,
+		Action:        decision.Action,
+		Findings:      len(result.Findings),
+	}, nil
 }
 
 func (s *Service) Sanitize(showDiff bool) (bool, error) {
@@ -69,9 +105,7 @@ func (s *Service) Sanitize(showDiff bool) (bool, error) {
 		return false, fmt.Errorf("read clipboard: %w", err)
 	}
 
-	activeAppName := s.resolveActiveAppName()
-	result := s.analyze(current, activeAppName)
-	decision := s.policyResolver.Resolve(activeAppName, result.Score, result.RiskLevel)
+	decision, result := s.decide(current)
 
 	if showDiff {
 		fmt.Printf(
@@ -87,7 +121,7 @@ func (s *Service) Sanitize(showDiff bool) (bool, error) {
 		fmt.Printf("after:  %q\n", s.resultingClipboard(decision.Action, current, result.SanitizedText))
 	}
 
-	changed, _, err := s.applyAction(decision, current, result.SanitizedText)
+	changed, _, err := s.applyAction(decision, current, result.SanitizedText, hashText(current))
 	if err != nil {
 		return false, err
 	}
@@ -121,7 +155,8 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	var lastSeen string
+	var lastSeenHash [32]byte
+	seen := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -131,24 +166,31 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 			if err != nil {
 				return fmt.Errorf("read clipboard: %w", err)
 			}
-			if current == lastSeen {
+			currentHash := hashText(current)
+			if seen && currentHash == lastSeenHash {
 				continue
 			}
-			lastSeen = current
+			seen = true
+			lastSeenHash = currentHash
 
-			activeAppName := s.resolveActiveAppName()
-			result := s.analyze(current, activeAppName)
-			decision := s.policyResolver.Resolve(activeAppName, result.Score, result.RiskLevel)
+			decision, result := s.decide(current)
 
-			changed, nextValue, err := s.applyAction(decision, current, result.SanitizedText)
+			changed, nextValue, err := s.applyAction(decision, current, result.SanitizedText, currentHash)
 			if err != nil {
 				return err
 			}
 			if changed {
-				lastSeen = nextValue
+				lastSeenHash = hashText(nextValue)
 			}
 		}
 	}
+}
+
+func (s *Service) decide(text string) (PolicyDecision, policyResult) {
+	activeAppName := s.resolveActiveAppName()
+	result := s.analyze(text, activeAppName)
+	decision := s.policyResolver.Resolve(activeAppName, result.Score, result.RiskLevel)
+	return decision, result
 }
 
 type policyResult struct {
@@ -227,38 +269,35 @@ func (s *Service) applyAction(
 	decision PolicyDecision,
 	current string,
 	sanitized string,
+	clipboardHash [32]byte,
 ) (changed bool, nextValue string, err error) {
 	switch decision.Action {
 	case config.ActionAllow:
 		return false, current, nil
 	case config.ActionWarn:
-		s.notifyWarning(decision)
+		s.notifyAction(decision, clipboardHash)
 		return false, current, nil
 	case config.ActionBlock:
-		if current == "" {
-			return false, current, nil
-		}
-		if err := s.clipboard.WriteText(""); err != nil {
+		if err := s.clipboard.WriteText(blockedClipboardValue); err != nil {
 			return false, current, fmt.Errorf("write clipboard: %w", err)
 		}
-		return true, "", nil
+		s.notifyAction(decision, clipboardHash)
+		return blockedClipboardValue != current, blockedClipboardValue, nil
 	case config.ActionSanitize:
 		fallthrough
 	default:
-		if sanitized == current {
-			return false, current, nil
-		}
 		if err := s.clipboard.WriteText(sanitized); err != nil {
 			return false, current, fmt.Errorf("write clipboard: %w", err)
 		}
-		return true, sanitized, nil
+		s.notifyAction(decision, clipboardHash)
+		return sanitized != current, sanitized, nil
 	}
 }
 
 func (s *Service) resultingClipboard(action config.Action, current, sanitized string) string {
 	switch action {
 	case config.ActionBlock:
-		return ""
+		return blockedClipboardValue
 	case config.ActionSanitize:
 		return sanitized
 	default:
@@ -266,8 +305,11 @@ func (s *Service) resultingClipboard(action config.Action, current, sanitized st
 	}
 }
 
-func (s *Service) notifyWarning(decision PolicyDecision) {
+func (s *Service) notifyAction(decision PolicyDecision, clipboardHash [32]byte) {
 	if s.notifier == nil {
+		return
+	}
+	if !s.shouldNotify(clipboardHash) {
 		return
 	}
 
@@ -276,13 +318,52 @@ func (s *Service) notifyWarning(decision PolicyDecision) {
 		appLabel = "Unknown App"
 	}
 
-	message := fmt.Sprintf(
-		"Sensitive clipboard content detected in %s (risk=%s score=%d)",
-		appLabel,
-		decision.RiskLevel,
-		decision.Score,
-	)
-	_ = s.notifier.Notify("Clipguard warning", message)
+	title, message := notificationForAction(decision, appLabel)
+	_ = s.notifier.Notify(title, message)
+}
+
+func (s *Service) shouldNotify(clipboardHash [32]byte) bool {
+	if s.alertDebounce <= 0 {
+		return true
+	}
+
+	now := s.timeNow()
+	last, ok := s.lastAlertByHash[clipboardHash]
+	if ok && now.Sub(last) < s.alertDebounce {
+		return false
+	}
+	s.lastAlertByHash[clipboardHash] = now
+	return true
+}
+
+func notificationForAction(decision PolicyDecision, appLabel string) (title, message string) {
+	switch decision.Action {
+	case config.ActionWarn:
+		return "Clipguard warning", fmt.Sprintf(
+			"Sensitive clipboard content detected in %s (risk=%s score=%d)",
+			appLabel,
+			decision.RiskLevel,
+			decision.Score,
+		)
+	case config.ActionBlock:
+		return "Clipguard blocked", fmt.Sprintf(
+			"Clipboard content blocked in %s (risk=%s score=%d)",
+			appLabel,
+			decision.RiskLevel,
+			decision.Score,
+		)
+	default:
+		return "Clipguard sanitized", fmt.Sprintf(
+			"Clipboard content sanitized in %s (risk=%s score=%d)",
+			appLabel,
+			decision.RiskLevel,
+			decision.Score,
+		)
+	}
+}
+
+func hashText(value string) [32]byte {
+	return sha256.Sum256([]byte(value))
 }
 
 func cloneDetectorToggles(input map[string]bool) map[string]bool {

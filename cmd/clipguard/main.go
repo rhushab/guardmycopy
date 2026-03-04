@@ -37,6 +37,8 @@ func run(args []string) int {
 		return 0
 	case "sanitize":
 		return runSanitize(args[1:])
+	case "once":
+		return runOnce(args[1:])
 	case "run":
 		return runLoop(args[1:])
 	case "--help", "-h", "help":
@@ -128,6 +130,7 @@ func runLoop(args []string) int {
 
 	intervalMS := fs.Int("interval", 0, "poll interval in milliseconds (defaults to config)")
 	configPath := fs.String("config", "", "path to YAML config file (optional)")
+	once := fs.Bool("once", false, "scan current clipboard once and print decision")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -160,6 +163,10 @@ func runLoop(args []string) int {
 	}
 
 	svc := app.NewWithDependencies(cfg, adapters.Clipboard, adapters.ForegroundApp, adapters.Notifier)
+	if *once {
+		return runOnceWithService(svc, os.Stdout, os.Stderr)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -171,10 +178,61 @@ func runLoop(args []string) int {
 	return 0
 }
 
+func runOnce(args []string) int {
+	fs := flag.NewFlagSet("once", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	configPath := fs.String("config", "", "path to YAML config file (optional)")
+
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "once does not accept positional arguments")
+		printUsage(os.Stderr)
+		return 2
+	}
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		return 1
+	}
+
+	adapters, err := platform.Select()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+
+	svc := app.NewWithDependencies(cfg, adapters.Clipboard, adapters.ForegroundApp, adapters.Notifier)
+	return runOnceWithService(svc, os.Stdout, os.Stderr)
+}
+
+func runOnceWithService(svc *app.Service, stdout, stderr io.Writer) int {
+	decision, err := svc.ScanCurrent()
+	if err != nil {
+		fmt.Fprintf(stderr, "scan clipboard: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(
+		stdout,
+		"app=%q action=%s risk=%s score=%d findings=%d\n",
+		decision.ActiveAppName,
+		decision.Action,
+		decision.RiskLevel,
+		decision.Score,
+		decision.Findings,
+	)
+	return 0
+}
+
 func printUsage(w io.Writer) {
 	_, _ = fmt.Fprintf(w, `Usage:
   clipguard sanitize [--diff] < input.txt
-  clipguard run [--interval ms] [--config path]
+  clipguard once [--config path]
+  clipguard run [--interval ms] [--config path] [--once]
   clipguard --version
 
 When --config is not set, clipguard loads defaults and then attempts:

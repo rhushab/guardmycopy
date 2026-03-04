@@ -62,6 +62,18 @@ Run polling mode with an explicit YAML config path:
 ./clipguard run --config ./configs/example.yaml
 ```
 
+Scan current clipboard once and print decision:
+
+```bash
+./clipguard once
+```
+
+Equivalent one-shot mode via `run`:
+
+```bash
+./clipguard run --once
+```
+
 Print version:
 
 ```bash
@@ -104,12 +116,12 @@ per_app:
 Action options per risk level:
 - `allow`: keep clipboard content unchanged
 - `warn`: show a notification and keep clipboard unchanged
-- `sanitize`: redact matched secret spans
-- `block`: clear clipboard content
+- `sanitize`: redact matched secret spans, write sanitized text, and notify
+- `block`: replace clipboard content with `[CLIPGUARD BLOCKED]` and notify
 
 Use [`configs/example.yaml`](configs/example.yaml) as a starting point.
 
-## Basic smoke run (macOS)
+## Manual Test Checklist (macOS)
 
 1. Build:
 
@@ -117,24 +129,20 @@ Use [`configs/example.yaml`](configs/example.yaml) as a starting point.
 go build ./cmd/clipguard
 ```
 
-2. Verify sanitize pipeline quickly:
+2. One-shot decision check:
 
 ```bash
-echo 'token=AKIAIOSFODNN7EXAMPLE' | ./clipguard sanitize --diff
+printf '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n' | pbcopy
+./clipguard once
 ```
 
-3. Start polling loop:
+3. Polling check with faster interval:
 
 ```bash
 ./clipguard run --interval 250
 ```
 
-4. In another terminal, copy a known secret pattern and confirm clipboard output is sanitized/blocked per config:
-
-```bash
-printf '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n' | pbcopy
-pbpaste
-```
+4. While running, copy a secret pattern and confirm clipboard becomes sanitized or `[CLIPGUARD BLOCKED]` per config, with notification shown.
 
 ## Test
 

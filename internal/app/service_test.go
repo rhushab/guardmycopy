@@ -124,7 +124,8 @@ func TestSanitizeBlockActionClearsClipboard(t *testing.T) {
 	cfg.Global.Actions[core.RiskLevelHigh] = config.ActionBlock
 
 	clip := &mockClipboard{value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"}
-	svc := New(cfg, clip)
+	notifier := &mockNotifier{}
+	svc := NewWithDependencies(cfg, clip, nil, notifier)
 
 	changed, err := svc.Sanitize(false)
 	if err != nil {
@@ -136,8 +137,74 @@ func TestSanitizeBlockActionClearsClipboard(t *testing.T) {
 	if clip.writes != 1 {
 		t.Fatalf("expected one write, got %d", clip.writes)
 	}
-	if clip.value != "" {
-		t.Fatalf("expected clipboard to be cleared, got %q", clip.value)
+	if clip.value != blockedClipboardValue {
+		t.Fatalf("expected clipboard to be blocked marker, got %q", clip.value)
+	}
+	if notifier.calls != 1 {
+		t.Fatalf("expected 1 notification, got %d", notifier.calls)
+	}
+}
+
+func TestScanCurrentReportsDecision(t *testing.T) {
+	clip := &mockClipboard{value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"}
+	svc := New(config.Defaults(), clip)
+
+	decision, err := svc.ScanCurrent()
+	if err != nil {
+		t.Fatalf("ScanCurrent returned error: %v", err)
+	}
+	if decision.Action != config.ActionSanitize {
+		t.Fatalf("expected sanitize action, got %s", decision.Action)
+	}
+	if decision.RiskLevel != core.RiskLevelHigh {
+		t.Fatalf("expected high risk level, got %s", decision.RiskLevel)
+	}
+	if decision.Score != 15 {
+		t.Fatalf("expected score 15, got %d", decision.Score)
+	}
+	if decision.Findings != 1 {
+		t.Fatalf("expected 1 finding, got %d", decision.Findings)
+	}
+}
+
+func TestApplyActionDebouncesNotificationsPerHash(t *testing.T) {
+	cfg := config.Defaults()
+	clip := &mockClipboard{}
+	notifier := &mockNotifier{}
+	svc := NewWithDependencies(cfg, clip, nil, notifier)
+
+	now := time.Unix(100, 0)
+	svc.timeNow = func() time.Time { return now }
+
+	decision := PolicyDecision{
+		ActiveAppName: "Terminal",
+		Score:         15,
+		RiskLevel:     core.RiskLevelHigh,
+		Action:        config.ActionWarn,
+	}
+	contentHash := hashText("secret payload")
+
+	if _, _, err := svc.applyAction(decision, "secret payload", "secret payload", contentHash); err != nil {
+		t.Fatalf("first applyAction returned error: %v", err)
+	}
+	if notifier.calls != 1 {
+		t.Fatalf("expected first notification, got %d calls", notifier.calls)
+	}
+
+	now = now.Add(500 * time.Millisecond)
+	if _, _, err := svc.applyAction(decision, "secret payload", "secret payload", contentHash); err != nil {
+		t.Fatalf("second applyAction returned error: %v", err)
+	}
+	if notifier.calls != 1 {
+		t.Fatalf("expected debounce to suppress second notification, got %d calls", notifier.calls)
+	}
+
+	now = now.Add(600 * time.Millisecond)
+	if _, _, err := svc.applyAction(decision, "secret payload", "secret payload", contentHash); err != nil {
+		t.Fatalf("third applyAction returned error: %v", err)
+	}
+	if notifier.calls != 2 {
+		t.Fatalf("expected notification after debounce window, got %d calls", notifier.calls)
 	}
 }
 
