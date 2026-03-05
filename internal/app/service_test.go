@@ -17,12 +17,14 @@ import (
 )
 
 type mockClipboard struct {
-	value    string
-	readErr  error
-	writeErr error
-	reads    int
-	writes   int
-	readHook func()
+	value         string
+	readErr       error
+	writeErr      error
+	reads         int
+	writes        int
+	writeAttempts int
+	readHook      func()
+	writeHook     func(attempt int)
 }
 
 func (m *mockClipboard) ReadText() (string, error) {
@@ -37,6 +39,10 @@ func (m *mockClipboard) ReadText() (string, error) {
 }
 
 func (m *mockClipboard) WriteText(value string) error {
+	m.writeAttempts++
+	if m.writeHook != nil {
+		m.writeHook(m.writeAttempts)
+	}
 	if m.writeErr != nil {
 		return m.writeErr
 	}
@@ -82,10 +88,12 @@ func (m *mockNotifier) Notify(_, _ string) error {
 }
 
 type mockRuntimeStateStore struct {
-	state     userstate.State
-	loadErr   error
-	saveErr   error
-	saveCalls int
+	state        userstate.State
+	loadErr      error
+	saveErr      error
+	saveCalls    int
+	saveAttempts int
+	saveHook     func(attempt int)
 }
 
 func (m *mockRuntimeStateStore) Load() (userstate.State, error) {
@@ -96,6 +104,10 @@ func (m *mockRuntimeStateStore) Load() (userstate.State, error) {
 }
 
 func (m *mockRuntimeStateStore) Save(state userstate.State) error {
+	m.saveAttempts++
+	if m.saveHook != nil {
+		m.saveHook(m.saveAttempts)
+	}
 	if m.saveErr != nil {
 		return m.saveErr
 	}
@@ -518,6 +530,147 @@ func TestRunContinuesAfterTransientClipboardReadFailure(t *testing.T) {
 	}
 	if !strings.Contains(warnings.String(), "clipboard read failed; retrying") {
 		t.Fatalf("expected clipboard read warning, got %q", warnings.String())
+	}
+}
+
+func TestRunContinuesAfterRuntimeStateLoadFailure(t *testing.T) {
+	clip := &mockClipboard{
+		value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	clip.readHook = func() {
+		cancel()
+		clip.readHook = nil
+	}
+
+	var warnings bytes.Buffer
+	svc := New(config.Defaults(), clip)
+	svc.SetRuntimeStateStore(&mockRuntimeStateStore{loadErr: errors.New("state file corrupt")})
+	svc.SetWarningOutput(&warnings)
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if clip.writes != 1 {
+		t.Fatalf("expected enforcement after runtime state load failure, got %d writes", clip.writes)
+	}
+	if !strings.Contains(warnings.String(), "runtime state unavailable; continuing without persisted snooze or allow-once state") {
+		t.Fatalf("expected runtime state load warning, got %q", warnings.String())
+	}
+}
+
+func TestRunRetriesAfterTransientClipboardWriteFailure(t *testing.T) {
+	clip := &mockClipboardWithChangeDetector{
+		mockClipboard: &mockClipboard{
+			value: "hello",
+		},
+		changeCounts: []int64{1, 2, 2},
+	}
+	clip.changeCountHook = func(call int) {
+		if call == 2 {
+			clip.value = "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	clip.writeHook = func(attempt int) {
+		switch attempt {
+		case 1:
+			clip.writeErr = errors.New("pasteboard temporarily unavailable")
+		default:
+			clip.writeErr = nil
+			cancel()
+			clip.writeHook = nil
+		}
+	}
+
+	var warnings bytes.Buffer
+	svc := New(config.Defaults(), clip)
+	svc.SetWarningOutput(&warnings)
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if clip.reads != 3 {
+		t.Fatalf("expected retry path to read clipboard three times, got %d reads", clip.reads)
+	}
+	if clip.writeAttempts != 2 {
+		t.Fatalf("expected two clipboard write attempts, got %d", clip.writeAttempts)
+	}
+	if clip.writes != 1 {
+		t.Fatalf("expected write retry to succeed once, got %d successful writes", clip.writes)
+	}
+	if clip.value != blockedClipboardValue {
+		t.Fatalf("expected clipboard to be blocked after retry, got %q", clip.value)
+	}
+	if !strings.Contains(warnings.String(), "clipboard write failed; keeping enforcement active and retrying") {
+		t.Fatalf("expected clipboard write warning, got %q", warnings.String())
+	}
+}
+
+func TestRunDoesNotRepeatAllowOnceBypassAfterSaveFailure(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Global.Actions[core.RiskLevelHigh] = config.ActionWarn
+
+	clip := &mockClipboard{
+		value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend",
+	}
+	notifier := &mockNotifier{}
+	foregroundCalls := 0
+	foreground := &mockForegroundApp{
+		activeApp: func() (string, string, error) {
+			foregroundCalls++
+			if foregroundCalls < 3 {
+				return "Slack", "com.tinyspeck.slackmacgap", nil
+			}
+			return "Terminal", "com.apple.Terminal", nil
+		},
+	}
+	stateStore := &mockRuntimeStateStore{
+		state: userstate.State{
+			AllowOnce: true,
+		},
+	}
+	stateStore.saveHook = func(attempt int) {
+		if attempt == 1 {
+			stateStore.saveErr = errors.New("disk full")
+			return
+		}
+		stateStore.saveErr = nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	clip.readHook = func() {
+		if clip.reads == 3 {
+			cancel()
+			clip.readHook = nil
+		}
+	}
+
+	var warnings bytes.Buffer
+	svc := NewWithDependencies(cfg, clip, foreground, notifier)
+	svc.alertDebounce = 0
+	svc.SetRuntimeStateStore(stateStore)
+	svc.SetWarningOutput(&warnings)
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if notifier.calls != 2 {
+		t.Fatalf("expected enforcement on both eligible scans, got %d notifications", notifier.calls)
+	}
+	if stateStore.state.AllowOnce {
+		t.Fatal("expected allow_once to be reconciled after retry")
+	}
+	if !strings.Contains(warnings.String(), "runtime state save failed; continuing with enforcement") {
+		t.Fatalf("expected runtime state save warning, got %q", warnings.String())
 	}
 }
 
