@@ -6,7 +6,7 @@ type Clipboard interface {
 }
 
 type ForegroundApp interface {
-	ActiveAppName() (string, error)
+	ActiveApp() (name string, bundleID string, err error)
 }
 
 type Notifier interface {

@@ -11,7 +11,7 @@ func TestPolicyResolverUsesThresholdsFromScore(t *testing.T) {
 	cfg := config.Defaults()
 	resolver := NewPolicyResolver(cfg)
 
-	decision := resolver.Resolve("", 15, core.RiskLevelLow)
+	decision := resolver.Resolve("", "", 15, core.RiskLevelLow)
 	if decision.RiskLevel != core.RiskLevelHigh {
 		t.Fatalf("unexpected risk level: got %q want %q", decision.RiskLevel, core.RiskLevelHigh)
 	}
@@ -28,12 +28,36 @@ func TestPolicyResolverUsesPerAppOverrides(t *testing.T) {
 	cfg.PerApp["Google Chrome"] = policy
 
 	resolver := NewPolicyResolver(cfg)
-	decision := resolver.Resolve("Google Chrome", 4, core.RiskLevelLow)
+	decision := resolver.Resolve("Google Chrome", "", 4, core.RiskLevelLow)
 	if decision.RiskLevel != core.RiskLevelMed {
 		t.Fatalf("unexpected risk level: got %q want %q", decision.RiskLevel, core.RiskLevelMed)
 	}
 	if decision.Action != config.ActionWarn {
 		t.Fatalf("unexpected action: got %q want %q", decision.Action, config.ActionWarn)
+	}
+}
+
+func TestPolicyResolverPrefersBundleIDOverrideBeforeAppName(t *testing.T) {
+	cfg := config.Defaults()
+
+	appPolicy := clonePolicy(cfg.Global)
+	appPolicy.Thresholds.Med = 3
+	appPolicy.Actions[core.RiskLevelMed] = config.ActionWarn
+	cfg.PerApp["Google Chrome"] = appPolicy
+
+	bundlePolicy := clonePolicy(cfg.Global)
+	bundlePolicy.Thresholds.Med = 3
+	bundlePolicy.Actions[core.RiskLevelMed] = config.ActionBlock
+	cfg.PerAppBundleID["com.google.Chrome"] = bundlePolicy
+
+	resolver := NewPolicyResolver(cfg)
+	decision := resolver.Resolve("Google Chrome", "com.google.Chrome", 4, core.RiskLevelLow)
+
+	if decision.Action != config.ActionBlock {
+		t.Fatalf("unexpected action: got %q want %q", decision.Action, config.ActionBlock)
+	}
+	if decision.ActiveAppBundleID != "com.google.Chrome" {
+		t.Fatalf("unexpected active app bundle id: %q", decision.ActiveAppBundleID)
 	}
 }
 

@@ -52,6 +52,10 @@ per_app:
       high: block
     allowlist_patterns:
       - '^chrome-extension://'
+per_app_bundle_id:
+  "com.google.Chrome":
+    actions:
+      high: block
 `
 )
 
@@ -79,14 +83,16 @@ type Policy struct {
 }
 
 type Config struct {
-	PollInterval time.Duration
-	Global       Policy
-	PerApp       map[string]Policy
+	PollInterval   time.Duration
+	Global         Policy
+	PerApp         map[string]Policy
+	PerAppBundleID map[string]Policy
 }
 
 type fileConfig struct {
-	Global globalConfig          `yaml:"global"`
-	PerApp map[string]policyFile `yaml:"per_app"`
+	Global         globalConfig          `yaml:"global"`
+	PerApp         map[string]policyFile `yaml:"per_app"`
+	PerAppBundleID map[string]policyFile `yaml:"per_app_bundle_id"`
 }
 
 type globalConfig struct {
@@ -140,7 +146,8 @@ func Defaults() Config {
 			AllowlistPatterns: nil,
 			allowlistRegex:    nil,
 		},
-		PerApp: map[string]Policy{},
+		PerApp:         map[string]Policy{},
+		PerAppBundleID: map[string]Policy{},
 	}
 }
 
@@ -270,10 +277,35 @@ func load(path string, warn func(string)) (Config, error) {
 		cfg.PerApp[appName] = policy
 	}
 
+	cfg.PerAppBundleID = make(map[string]Policy, len(fromFile.PerAppBundleID))
+	for bundleID, fromApp := range fromFile.PerAppBundleID {
+		if strings.TrimSpace(bundleID) == "" {
+			return Config{}, errors.New("per_app_bundle_id contains empty bundle identifier")
+		}
+
+		policy := clonePolicy(cfg.Global)
+		if err := applyPolicyOverride(&policy, fromApp); err != nil {
+			return Config{}, fmt.Errorf("per_app_bundle_id %q: %w", bundleID, err)
+		}
+		if err := finalizePolicy(&policy, fmt.Sprintf("per_app_bundle_id.%s", bundleID), warn); err != nil {
+			return Config{}, fmt.Errorf("per_app_bundle_id %q: %w", bundleID, err)
+		}
+		cfg.PerAppBundleID[bundleID] = policy
+	}
+
 	return cfg, nil
 }
 
 func (c Config) PolicyForApp(appName string) Policy {
+	return c.PolicyForAppAndBundleID(appName, "")
+}
+
+func (c Config) PolicyForAppAndBundleID(appName, bundleID string) Policy {
+	if bundleID != "" {
+		if policy, ok := c.PerAppBundleID[bundleID]; ok {
+			return policy
+		}
+	}
 	if policy, ok := c.PerApp[appName]; ok {
 		return policy
 	}

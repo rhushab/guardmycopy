@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - `status` output now includes launch-agent loaded/running state plus runtime bypass state (`snoozed-until`, `allow-once`) from persisted user state
 - `log stats --since <duration>` command for local audit analytics (top blocked/warned apps, risk-level counts, and recent block reasons) with safe skipping of malformed JSONL lines
 - Added a common token pack detector for AWS access key IDs, GitHub PATs (classic + fine-grained), Slack tokens/webhooks, and Stripe secret keys with distinct finding types and config toggles
+- Added optional `per_app_bundle_id` policy overrides with precedence `bundle_id > app name > global`, plus macOS foreground bundle-id resolution in decision context
 
 ### Changed
 - Added explicit macOS-only guardrails for launch-agent lifecycle commands with clear errors on other operating systems

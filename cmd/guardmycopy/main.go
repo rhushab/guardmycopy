@@ -342,8 +342,9 @@ func runOnceWithService(svc *app.Service, stdout, stderr io.Writer, verbose bool
 
 	fmt.Fprintf(
 		stdout,
-		"app=%q action=%s risk=%s score=%d findings=%d\n",
+		"app=%q bundle_id=%q action=%s risk=%s score=%d findings=%d\n",
 		decision.ActiveAppName,
+		decision.ActiveAppBundleID,
 		decision.Action,
 		decision.RiskLevel,
 		decision.Score,

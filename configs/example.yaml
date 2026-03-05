@@ -41,3 +41,9 @@ per_app:
       high: 20
     actions:
       high: block
+
+per_app_bundle_id:
+  "com.google.Chrome":
+    actions:
+      med: warn
+      high: block

@@ -12,15 +12,16 @@ import (
 )
 
 type mockForegroundApp struct {
-	name string
-	err  error
+	name     string
+	bundleID string
+	err      error
 }
 
-func (m *mockForegroundApp) ActiveAppName() (string, error) {
+func (m *mockForegroundApp) ActiveApp() (string, string, error) {
 	if m.err != nil {
-		return "", m.err
+		return "", "", m.err
 	}
-	return m.name, nil
+	return m.name, m.bundleID, nil
 }
 
 func TestRunClipboardChangeScanDecisionActionFlow(t *testing.T) {
@@ -83,6 +84,62 @@ func TestRunClipboardChangeScanDecisionActionFlow(t *testing.T) {
 	}
 	if strings.Contains(entry.ContentHash, "PRIVATE KEY") {
 		t.Fatalf("audit entry should not contain raw clipboard content, got %q", entry.ContentHash)
+	}
+}
+
+func TestRunUsesBundleIDOverrideBeforePerApp(t *testing.T) {
+	cfg := config.Defaults()
+
+	chromePolicy := copyPolicy(cfg.Global)
+	chromePolicy.Actions[core.RiskLevelHigh] = config.ActionSanitize
+	cfg.PerApp["Google Chrome"] = chromePolicy
+
+	chromeBundlePolicy := copyPolicy(cfg.Global)
+	chromeBundlePolicy.Actions[core.RiskLevelHigh] = config.ActionWarn
+	cfg.PerAppBundleID["com.google.Chrome"] = chromeBundlePolicy
+
+	clip := &mockClipboard{
+		value: "prefix\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nsuffix",
+	}
+	notifier := &mockNotifier{}
+	foreground := &mockForegroundApp{name: "Google Chrome", bundleID: "com.google.Chrome"}
+	auditStore := &mockAuditLogStore{}
+
+	svc := NewWithDependencies(cfg, clip, foreground, notifier)
+	svc.SetAuditLogStore(auditStore)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	readCount := 0
+	clip.readHook = func() {
+		readCount++
+		if readCount == 1 {
+			cancel()
+			clip.readHook = nil
+		}
+	}
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if clip.writes != 0 {
+		t.Fatalf("expected warn action from bundle-id override to avoid write, got %d writes", clip.writes)
+	}
+	if notifier.calls != 1 {
+		t.Fatalf("expected one notification, got %d", notifier.calls)
+	}
+	if len(auditStore.entries) != 1 {
+		t.Fatalf("expected one audit entry, got %d", len(auditStore.entries))
+	}
+
+	entry := auditStore.entries[0]
+	if entry.Action != string(config.ActionWarn) {
+		t.Fatalf("expected warn action in audit entry, got %q", entry.Action)
+	}
+	if entry.App != "Google Chrome" {
+		t.Fatalf("expected app name in audit entry, got %q", entry.App)
 	}
 }
 

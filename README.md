@@ -8,7 +8,7 @@ It continuously scans clipboard text for likely secrets and applies policy actio
 What it does:
 - Detects likely sensitive text (PEM private keys, JWT-like tokens, env-style secrets, high-entropy tokens, and common service tokens such as AWS access key IDs, GitHub PATs, Slack tokens/webhooks, and Stripe secret keys)
 - Applies policy actions: `allow`, `warn`, `sanitize`, `block`
-- Supports per-app policy overrides (for example stricter browser/chat policies)
+- Supports per-app and per-app-bundle-id policy overrides (for example stricter browser/chat policies)
 - Provides optional local JSONL audit logging with hash-only clipboard representation
 
 What it does not do:
@@ -43,7 +43,7 @@ Out of scope:
 
 - Supported OS: **macOS only** (`darwin`)
 - Uses `pbpaste` / `pbcopy` for clipboard access
-- Uses `osascript` + `System Events` for foreground app and notifications
+- Uses `osascript` + `System Events` for foreground app name, bundle ID, and notifications
 - You may need Accessibility permission for your terminal/app:
   - `System Settings -> Privacy & Security -> Accessibility`
 
@@ -111,6 +111,7 @@ Use [`configs/example.yaml`](configs/example.yaml) as a base.
 Recommended policy style:
 - Strict for browsers/chat
 - More lenient for IDE/terminal
+- Use bundle-id overrides for app variants that share the same visible app name
 
 ```yaml
 global:
@@ -150,7 +151,20 @@ per_app:
     thresholds:
       med: 12
       high: 20
+    actions:
+      high: block
+
+per_app_bundle_id:
+  "com.google.Chrome":
+    actions:
+      med: warn
+      high: block
 ```
+
+Policy precedence:
+- `per_app_bundle_id` override (if bundle ID matches)
+- `per_app` override (if app name matches)
+- `global`
 
 ## Manual Verification Workflow (macOS)
 

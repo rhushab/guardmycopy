@@ -44,13 +44,24 @@ func NewForegroundApp() *ForegroundApp {
 	return &ForegroundApp{}
 }
 
-func (f *ForegroundApp) ActiveAppName() (string, error) {
-	script := `tell application "System Events" to get name of first application process whose frontmost is true`
+func (f *ForegroundApp) ActiveApp() (name string, bundleID string, err error) {
+	script := `tell application "System Events"
+set frontApp to first application process whose frontmost is true
+set appName to name of frontApp
+set appBundleID to ""
+try
+	set appBundleID to bundle identifier of frontApp
+on error
+	set appBundleID to ""
+end try
+return appName & linefeed & appBundleID
+end tell`
 	out, err := commandOutput("osascript", "-e", script)
 	if err != nil {
-		return "", fmt.Errorf("osascript active app failed: %w", err)
+		return "", "", fmt.Errorf("osascript active app failed: %w", err)
 	}
-	return cleanAppName(string(out)), nil
+	activeAppName, activeAppBundleID := parseActiveAppOutput(string(out))
+	return cleanAppName(activeAppName), cleanBundleID(activeAppBundleID), nil
 }
 
 type Notifier struct{}
@@ -88,6 +99,25 @@ func cleanAppName(raw string) string {
 	appName := strings.TrimSpace(raw)
 	appName = strings.Trim(appName, `"`)
 	return strings.Join(strings.Fields(appName), " ")
+}
+
+func cleanBundleID(raw string) string {
+	bundleID := strings.TrimSpace(raw)
+	bundleID = strings.Trim(bundleID, `"`)
+	return strings.Join(strings.Fields(bundleID), " ")
+}
+
+func parseActiveAppOutput(raw string) (name string, bundleID string) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", ""
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) == 1 {
+		return lines[0], ""
+	}
+	return lines[0], strings.Join(lines[1:], "\n")
 }
 
 func commandOutput(name string, args ...string) ([]byte, error) {

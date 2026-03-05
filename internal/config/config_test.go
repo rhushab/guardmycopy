@@ -20,6 +20,9 @@ func TestLoadDefaultsWhenDefaultFileMissing(t *testing.T) {
 	if cfg.PollInterval != 500*time.Millisecond {
 		t.Fatalf("unexpected default interval: %v", cfg.PollInterval)
 	}
+	if len(cfg.PerAppBundleID) != 0 {
+		t.Fatalf("expected empty per_app_bundle_id defaults, got %d entries", len(cfg.PerAppBundleID))
+	}
 	if !cfg.Global.DetectorEnabled(core.FindingTypeJWT) {
 		t.Fatal("expected jwt detector enabled by default")
 	}
@@ -60,6 +63,12 @@ per_app:
       high: sanitize
     allowlist_patterns:
       - '^chrome_safe_.*$'
+per_app_bundle_id:
+  "com.google.Chrome":
+    thresholds:
+      med: 3
+    actions:
+      med: block
 `
 
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -119,9 +128,39 @@ per_app:
 		t.Fatal("expected per-app allowlist pattern to match")
 	}
 
+	chromeBundlePolicy := cfg.PolicyForAppAndBundleID("Google Chrome", "com.google.Chrome")
+	if chromeBundlePolicy.Thresholds.Med != 3 {
+		t.Fatalf("unexpected per-app-bundle-id med threshold: %d", chromeBundlePolicy.Thresholds.Med)
+	}
+	if chromeBundlePolicy.ActionForRisk(core.RiskLevelMed) != ActionBlock {
+		t.Fatalf("unexpected per-app-bundle-id medium action: %q", chromeBundlePolicy.ActionForRisk(core.RiskLevelMed))
+	}
+	if chromeBundlePolicy.ActionForRisk(core.RiskLevelHigh) != ActionBlock {
+		t.Fatalf(
+			"unexpected per-app-bundle-id high action inheritance: %q",
+			chromeBundlePolicy.ActionForRisk(core.RiskLevelHigh),
+		)
+	}
+	if !chromeBundlePolicy.IsAllowlisted("public_TOKEN") {
+		t.Fatal("expected per-app-bundle-id allowlist to include global regex")
+	}
+
+	chromeWithoutBundle := cfg.PolicyForAppAndBundleID("Google Chrome", "com.google.ChromeBeta")
+	if chromeWithoutBundle.Thresholds.Med != 10 {
+		t.Fatalf("expected app-name fallback med threshold 10, got %d", chromeWithoutBundle.Thresholds.Med)
+	}
+	if chromeWithoutBundle.ActionForRisk(core.RiskLevelMed) != ActionWarn {
+		t.Fatalf("expected app-name fallback medium action warn, got %q", chromeWithoutBundle.ActionForRisk(core.RiskLevelMed))
+	}
+
 	fallback := cfg.PolicyForApp("Unknown App")
 	if fallback.ActionForRisk(core.RiskLevelHigh) != ActionBlock {
 		t.Fatalf("unexpected fallback action: %q", fallback.ActionForRisk(core.RiskLevelHigh))
+	}
+
+	legacyLookup := cfg.PolicyForApp("Google Chrome")
+	if legacyLookup.Thresholds.Med != chromePolicy.Thresholds.Med {
+		t.Fatalf("PolicyForApp should preserve per_app semantics, got med=%d", legacyLookup.Thresholds.Med)
 	}
 }
 
@@ -135,6 +174,24 @@ func TestLoadRejectsNegativeInterval(t *testing.T) {
 
 	if _, err := Load(path); err == nil {
 		t.Fatal("expected error for negative global.poll_interval_ms")
+	}
+}
+
+func TestLoadRejectsEmptyPerAppBundleIDKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "guardmycopy.yaml")
+
+	content := `per_app_bundle_id:
+  "":
+    actions:
+      high: block
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for empty per_app_bundle_id key")
 	}
 }
 
