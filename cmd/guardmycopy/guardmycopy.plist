@@ -6,10 +6,9 @@ Template LaunchAgent for guardmycopy.
 Manual setup (not automatic):
 1) Copy this file to ~/Library/LaunchAgents/com.guardmycopy.agent.plist
 2) Replace __GUARDMYCOPY_BIN__ with the absolute path to the guardmycopy binary.
-3) Replace __WORKDIR__ with your project directory.
-4) Replace __LOG_DIR__ with a writable directory for logs.
-5) Load it: launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.guardmycopy.agent.plist
-6) Verify: launchctl print gui/$(id -u)/com.guardmycopy.agent
+3) Replace __LOG_DIR__ with a writable directory for logs.
+4) Load it: launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.guardmycopy.agent.plist
+5) Verify: launchctl print gui/$(id -u)/com.guardmycopy.agent
 
 Disable/remove:
 - launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.guardmycopy.agent.plist
@@ -27,9 +26,6 @@ Disable/remove:
     <string>--interval</string>
     <string>500</string>
   </array>
-
-  <key>WorkingDirectory</key>
-  <string>__WORKDIR__</string>
 
   <key>RunAtLoad</key>
   <true/>

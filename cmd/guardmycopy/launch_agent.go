@@ -32,7 +32,6 @@ type launchAgentDeps struct {
 	templateData []byte
 	timeNow      func() time.Time
 	executable   func() (string, error)
-	cwd          func() (string, error)
 	homeDir      func() (string, error)
 	uid          func() int
 	readFile     func(string) ([]byte, error)
@@ -61,9 +60,6 @@ func (d launchAgentDeps) withDefaults() launchAgentDeps {
 	}
 	if d.executable == nil {
 		d.executable = os.Executable
-	}
-	if d.cwd == nil {
-		d.cwd = os.Getwd
 	}
 	if d.homeDir == nil {
 		d.homeDir = os.UserHomeDir
@@ -276,21 +272,9 @@ func installLaunchAgent(stdout io.Writer, deps launchAgentDeps) error {
 	if err != nil {
 		return fmt.Errorf("make executable path absolute: %w", err)
 	}
-	workDir, err := deps.cwd()
-	if err != nil {
-		return fmt.Errorf("resolve working directory: %w", err)
-	}
-	workDir, err = filepath.Abs(workDir)
-	if err != nil {
-		return fmt.Errorf("make working directory absolute: %w", err)
-	}
 	xmlBinPath, err := escapeXMLText(binPath)
 	if err != nil {
 		return fmt.Errorf("escape executable path for plist: %w", err)
-	}
-	xmlWorkDir, err := escapeXMLText(workDir)
-	if err != nil {
-		return fmt.Errorf("escape working directory for plist: %w", err)
 	}
 	xmlLogDir, err := escapeXMLText(logDir)
 	if err != nil {
@@ -304,11 +288,31 @@ func installLaunchAgent(stdout io.Writer, deps launchAgentDeps) error {
 		return fmt.Errorf("create log directory: %w", err)
 	}
 
-	rendered := strings.NewReplacer(
+	replacements := []string{
 		"__GUARDMYCOPY_BIN__", xmlBinPath,
-		"__WORKDIR__", xmlWorkDir,
 		"__LOG_DIR__", xmlLogDir,
-	).Replace(string(templateBytes))
+	}
+	if strings.Contains(string(templateBytes), "__WORKDIR__") {
+		stableWorkDir, err := deps.homeDir()
+		if err != nil {
+			return fmt.Errorf("resolve stable working directory: %w", err)
+		}
+		stableWorkDir = strings.TrimSpace(stableWorkDir)
+		if stableWorkDir == "" {
+			return errors.New("resolve stable working directory: empty path")
+		}
+		stableWorkDir, err = filepath.Abs(stableWorkDir)
+		if err != nil {
+			return fmt.Errorf("make stable working directory absolute: %w", err)
+		}
+		xmlWorkDir, err := escapeXMLText(stableWorkDir)
+		if err != nil {
+			return fmt.Errorf("escape stable working directory for plist: %w", err)
+		}
+		replacements = append(replacements, "__WORKDIR__", xmlWorkDir)
+	}
+
+	rendered := strings.NewReplacer(replacements...).Replace(string(templateBytes))
 
 	if unresolved := unresolvedTemplatePlaceholders(rendered); len(unresolved) > 0 {
 		return fmt.Errorf("plist template still contains placeholders: %s", strings.Join(unresolved, ", "))
@@ -458,21 +462,18 @@ func uninstallLaunchAgent(stdout io.Writer, deps launchAgentDeps) error {
 		return err
 	}
 
+	target := launchAgentTarget(deps.uid())
+	out, err := deps.runLaunchctl("bootout", target)
+	if err != nil && !isLaunchctlNotFound(out) {
+		return launchctlFailure("bootout", target, out, err)
+	}
+
 	if _, err := deps.stat(plistPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			fmt.Fprintf(stdout, "launch agent plist not found at %s\n", plistPath)
 			return nil
 		}
 		return fmt.Errorf("stat launch agent plist: %w", err)
-	}
-
-	domain := launchAgentDomain(deps.uid())
-	out, err := deps.runLaunchctl("bootout", domain, plistPath)
-	if err != nil && !isLaunchctlNotFound(out) {
-		if strings.TrimSpace(out) != "" {
-			return fmt.Errorf("launchctl bootout %s failed: %s (%w)", domain, out, err)
-		}
-		return fmt.Errorf("launchctl bootout %s failed: %w", domain, err)
 	}
 
 	if err := deps.remove(plistPath); err != nil && !errors.Is(err, os.ErrNotExist) {
