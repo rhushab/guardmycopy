@@ -23,8 +23,6 @@ Disable/remove:
   <array>
     <string>__GUARDMYCOPY_BIN__</string>
     <string>run</string>
-    <string>--interval</string>
-    <string>500</string>
   </array>
 
   <key>RunAtLoad</key>

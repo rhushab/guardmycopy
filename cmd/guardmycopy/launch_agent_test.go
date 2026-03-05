@@ -184,11 +184,33 @@ func TestRunInstallWithIOUsesEmbeddedTemplateWhenTemplatePathUnset(t *testing.T)
 	if !strings.Contains(plist, "/tmp/bin/guardmycopy") {
 		t.Fatalf("expected binary path in plist, got %q", plist)
 	}
+	if strings.Contains(plist, "<string>--interval</string>") {
+		t.Fatalf("expected embedded template to honor config poll interval, got %q", plist)
+	}
 	if strings.Contains(plist, "WorkingDirectory") {
 		t.Fatalf("expected embedded template to omit working directory, got %q", plist)
 	}
 	if len(launchctlCalls) != 2 {
 		t.Fatalf("expected two launchctl calls, got %d", len(launchctlCalls))
+	}
+}
+
+func TestShippedLaunchAgentTemplatesDoNotHardcodeInterval(t *testing.T) {
+	paths := []string{
+		"guardmycopy.plist",
+		filepath.Join("..", "..", "scripts", "macos", "guardmycopy.plist"),
+	}
+
+	for _, path := range paths {
+		templateBytes, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read template %q: %v", path, err)
+		}
+
+		template := string(templateBytes)
+		if strings.Contains(template, "<string>--interval</string>") {
+			t.Fatalf("expected template %q to rely on config poll interval, got %q", path, template)
+		}
 	}
 }
 

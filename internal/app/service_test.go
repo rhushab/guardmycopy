@@ -647,7 +647,7 @@ func TestRunDoesNotRepeatAllowOnceBypassAfterSaveFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	clip.readHook = func() {
-		if clip.reads == 3 {
+		if clip.reads == 4 {
 			cancel()
 			clip.readHook = nil
 		}
@@ -735,7 +735,7 @@ func TestShouldBypassEnforcementConsumesAllowOnce(t *testing.T) {
 	}
 }
 
-func TestRunRespectsAllowOnceState(t *testing.T) {
+func TestRunDoesNotConsumeAllowOnceOnInitialScan(t *testing.T) {
 	clip := &mockClipboard{value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"}
 	svc := New(config.Defaults(), clip)
 
@@ -756,11 +756,64 @@ func TestRunRespectsAllowOnceState(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context canceled, got %v", err)
 	}
-	if clip.writes != 0 {
-		t.Fatalf("expected run to skip enforcement due to allow-once, writes=%d", clip.writes)
+	if clip.writes != 1 {
+		t.Fatalf("expected initial scan to keep enforcing, writes=%d", clip.writes)
+	}
+	if !stateStore.state.AllowOnce {
+		t.Fatal("expected allow_once to remain pending until the next change")
+	}
+}
+
+func TestRunConsumesAllowOnceOnNextObservedChange(t *testing.T) {
+	clip := &mockClipboardWithChangeDetector{
+		mockClipboard: &mockClipboard{value: "hello"},
+		changeCounts:  []int64{1, 2, 2},
+	}
+	clip.changeCountHook = func(call int) {
+		if call == 2 {
+			clip.value = "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"
+		}
+	}
+
+	foregroundCalls := 0
+	foreground := &mockForegroundApp{
+		activeApp: func() (string, string, error) {
+			foregroundCalls++
+			if foregroundCalls < 3 {
+				return "Slack", "com.tinyspeck.slackmacgap", nil
+			}
+			return "Terminal", "com.apple.Terminal", nil
+		},
+	}
+
+	stateStore := &mockRuntimeStateStore{
+		state: userstate.State{
+			AllowOnce: true,
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	clip.writeHook = func(attempt int) {
+		cancel()
+		clip.writeHook = nil
+	}
+
+	svc := NewWithDependencies(config.Defaults(), clip, foreground, nil)
+	svc.SetRuntimeStateStore(stateStore)
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if clip.reads != 3 {
+		t.Fatalf("expected three clipboard reads across baseline, bypass, and reenforcement, got %d", clip.reads)
+	}
+	if clip.writes != 1 {
+		t.Fatalf("expected one clipboard write after allow_once was consumed, got %d", clip.writes)
 	}
 	if stateStore.state.AllowOnce {
-		t.Fatal("expected allow_once to be consumed during run")
+		t.Fatal("expected allow_once to be consumed on the next observed change")
 	}
 }
 
