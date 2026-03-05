@@ -46,6 +46,12 @@ func run(args []string) int {
 		return runOnce(args[1:])
 	case "run":
 		return runLoop(args[1:])
+	case "install":
+		return runInstall(args[1:])
+	case "uninstall":
+		return runUninstall(args[1:])
+	case "status":
+		return runStatus(args[1:])
 	case "snooze":
 		return runSnooze(args[1:])
 	case "allow-once":
@@ -78,6 +84,15 @@ func runHelp(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "run":
 		printRunUsage(stdout)
+		return 0
+	case "install":
+		printInstallUsage(stdout)
+		return 0
+	case "uninstall":
+		printUninstallUsage(stdout)
+		return 0
+	case "status":
+		printStatusUsage(stdout)
 		return 0
 	case "snooze":
 		printSnoozeUsage(stdout)
@@ -327,8 +342,9 @@ func runOnceWithService(svc *app.Service, stdout, stderr io.Writer, verbose bool
 
 	fmt.Fprintf(
 		stdout,
-		"app=%q action=%s risk=%s score=%d findings=%d\n",
+		"app=%q bundle_id=%q action=%s risk=%s score=%d findings=%d\n",
 		decision.ActiveAppName,
+		decision.ActiveAppBundleID,
 		decision.Action,
 		decision.RiskLevel,
 		decision.Score,
@@ -441,6 +457,10 @@ func runLog(args []string) int {
 }
 
 func runLogWithIO(args []string, stdout, stderr io.Writer, logPath string) int {
+	if len(args) > 0 && args[0] == "stats" {
+		return runLogStatsWithIO(args[1:], stdout, stderr, logPath, time.Now)
+	}
+
 	fs := flag.NewFlagSet("log", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { printLogUsage(fs.Output()) }
@@ -547,9 +567,12 @@ Commands:
   sanitize    redact sensitive spans from stdin
   once        scan clipboard once and print the decision
   run         run continuous clipboard scanning
+  install     install and bootstrap the macOS launch agent
+  uninstall   boot out and remove the macOS launch agent
+  status      print launch agent and runtime bypass status
   snooze      disable enforcement for a duration (for example: 5m)
   allow-once  bypass enforcement for the next clipboard event
-  log         print recent audit log entries
+  log         print recent audit log entries or stats
   config      manage guardmycopy config files
   version     print CLI version
 
@@ -606,9 +629,13 @@ func printAllowOnceUsage(w io.Writer) {
 func printLogUsage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, `Usage:
   guardmycopy log [--tail N]
+  guardmycopy log stats --since duration
 
 Options:
-  --tail N  print the last N audit log entries (default: 50)`)
+  --tail N  print the last N audit log entries (default: 50)
+
+Stats Options:
+  --since duration  required window (supports d/h/m, example: 7d, 12h, 30m)`)
 }
 
 func printConfigUsage(w io.Writer) {

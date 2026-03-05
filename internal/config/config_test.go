@@ -20,8 +20,14 @@ func TestLoadDefaultsWhenDefaultFileMissing(t *testing.T) {
 	if cfg.PollInterval != 500*time.Millisecond {
 		t.Fatalf("unexpected default interval: %v", cfg.PollInterval)
 	}
+	if len(cfg.PerAppBundleID) != 0 {
+		t.Fatalf("expected empty per_app_bundle_id defaults, got %d entries", len(cfg.PerAppBundleID))
+	}
 	if !cfg.Global.DetectorEnabled(core.FindingTypeJWT) {
 		t.Fatal("expected jwt detector enabled by default")
+	}
+	if !cfg.Global.DetectorEnabled(core.FindingTypeStripeSecretKey) {
+		t.Fatal("expected stripe secret key detector enabled by default")
 	}
 	if cfg.Global.ActionForRisk(core.RiskLevelHigh) != ActionBlock {
 		t.Fatalf("unexpected default action: %q", cfg.Global.ActionForRisk(core.RiskLevelHigh))
@@ -39,6 +45,7 @@ func TestLoadFromYAML(t *testing.T) {
     high: 20
   detector_toggles:
     jwt: false
+    aws_access_key_id: false
   actions:
     low: allow
     med: warn
@@ -51,10 +58,17 @@ per_app:
       med: 10
     detector_toggles:
       env_secret: false
+      github_pat_classic: false
     actions:
       high: sanitize
     allowlist_patterns:
       - '^chrome_safe_.*$'
+per_app_bundle_id:
+  "com.google.Chrome":
+    thresholds:
+      med: 3
+    actions:
+      med: block
 `
 
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -78,6 +92,9 @@ per_app:
 	if cfg.Global.DetectorEnabled(core.FindingTypeJWT) {
 		t.Fatal("expected jwt detector disabled in global policy")
 	}
+	if cfg.Global.DetectorEnabled(core.FindingTypeAWSAccessKeyID) {
+		t.Fatal("expected aws_access_key_id detector disabled in global policy")
+	}
 	if cfg.Global.ActionForRisk(core.RiskLevelMed) != ActionWarn {
 		t.Fatalf("unexpected global medium action: %q", cfg.Global.ActionForRisk(core.RiskLevelMed))
 	}
@@ -98,6 +115,9 @@ per_app:
 	if chromePolicy.DetectorEnabled(core.FindingTypeEnvSecret) {
 		t.Fatal("expected env_secret detector disabled in per-app policy")
 	}
+	if chromePolicy.DetectorEnabled(core.FindingTypeGitHubPATClassic) {
+		t.Fatal("expected github_pat_classic detector disabled in per-app policy")
+	}
 	if chromePolicy.ActionForRisk(core.RiskLevelHigh) != ActionSanitize {
 		t.Fatalf("unexpected per-app high action: %q", chromePolicy.ActionForRisk(core.RiskLevelHigh))
 	}
@@ -108,9 +128,39 @@ per_app:
 		t.Fatal("expected per-app allowlist pattern to match")
 	}
 
+	chromeBundlePolicy := cfg.PolicyForAppAndBundleID("Google Chrome", "com.google.Chrome")
+	if chromeBundlePolicy.Thresholds.Med != 3 {
+		t.Fatalf("unexpected per-app-bundle-id med threshold: %d", chromeBundlePolicy.Thresholds.Med)
+	}
+	if chromeBundlePolicy.ActionForRisk(core.RiskLevelMed) != ActionBlock {
+		t.Fatalf("unexpected per-app-bundle-id medium action: %q", chromeBundlePolicy.ActionForRisk(core.RiskLevelMed))
+	}
+	if chromeBundlePolicy.ActionForRisk(core.RiskLevelHigh) != ActionBlock {
+		t.Fatalf(
+			"unexpected per-app-bundle-id high action inheritance: %q",
+			chromeBundlePolicy.ActionForRisk(core.RiskLevelHigh),
+		)
+	}
+	if !chromeBundlePolicy.IsAllowlisted("public_TOKEN") {
+		t.Fatal("expected per-app-bundle-id allowlist to include global regex")
+	}
+
+	chromeWithoutBundle := cfg.PolicyForAppAndBundleID("Google Chrome", "com.google.ChromeBeta")
+	if chromeWithoutBundle.Thresholds.Med != 10 {
+		t.Fatalf("expected app-name fallback med threshold 10, got %d", chromeWithoutBundle.Thresholds.Med)
+	}
+	if chromeWithoutBundle.ActionForRisk(core.RiskLevelMed) != ActionWarn {
+		t.Fatalf("expected app-name fallback medium action warn, got %q", chromeWithoutBundle.ActionForRisk(core.RiskLevelMed))
+	}
+
 	fallback := cfg.PolicyForApp("Unknown App")
 	if fallback.ActionForRisk(core.RiskLevelHigh) != ActionBlock {
 		t.Fatalf("unexpected fallback action: %q", fallback.ActionForRisk(core.RiskLevelHigh))
+	}
+
+	legacyLookup := cfg.PolicyForApp("Google Chrome")
+	if legacyLookup.Thresholds.Med != chromePolicy.Thresholds.Med {
+		t.Fatalf("PolicyForApp should preserve per_app semantics, got med=%d", legacyLookup.Thresholds.Med)
 	}
 }
 
@@ -124,6 +174,24 @@ func TestLoadRejectsNegativeInterval(t *testing.T) {
 
 	if _, err := Load(path); err == nil {
 		t.Fatal("expected error for negative global.poll_interval_ms")
+	}
+}
+
+func TestLoadRejectsEmptyPerAppBundleIDKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "guardmycopy.yaml")
+
+	content := `per_app_bundle_id:
+  "":
+    actions:
+      high: block
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for empty per_app_bundle_id key")
 	}
 }
 
@@ -181,6 +249,48 @@ func TestLoadRejectsUnsupportedAction(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unsupported action") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadNormalizesCommonTokenPackDetectorToggles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "guardmycopy.yaml")
+
+	content := `global:
+  detector_toggles:
+    aws-access-key-id: false
+    github pat classic: false
+    github-pat-fine-grained: false
+    slack token: false
+    slack-webhook: false
+    stripe secret key: false
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.Global.DetectorEnabled(core.FindingTypeAWSAccessKeyID) {
+		t.Fatal("expected aws_access_key_id detector disabled after normalization")
+	}
+	if cfg.Global.DetectorEnabled(core.FindingTypeGitHubPATClassic) {
+		t.Fatal("expected github_pat_classic detector disabled after normalization")
+	}
+	if cfg.Global.DetectorEnabled(core.FindingTypeGitHubPATFine) {
+		t.Fatal("expected github_pat_fine_grained detector disabled after normalization")
+	}
+	if cfg.Global.DetectorEnabled(core.FindingTypeSlackToken) {
+		t.Fatal("expected slack_token detector disabled after normalization")
+	}
+	if cfg.Global.DetectorEnabled(core.FindingTypeSlackWebhook) {
+		t.Fatal("expected slack_webhook detector disabled after normalization")
+	}
+	if cfg.Global.DetectorEnabled(core.FindingTypeStripeSecretKey) {
+		t.Fatal("expected stripe_secret_key detector disabled after normalization")
 	}
 }
 

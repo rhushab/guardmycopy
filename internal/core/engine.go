@@ -22,6 +22,7 @@ func New() *Engine {
 			NewPEMPrivateKeyDetector(),
 			NewJWTDetector(),
 			NewEnvSecretDetector(),
+			NewCommonTokenPackDetector(),
 			NewHighEntropyTokenDetector(),
 		},
 		NewFormatPreservingRedactor(),
@@ -110,7 +111,29 @@ func (e *Engine) detect(text string) []Finding {
 		return validFindings[i].End < validFindings[j].End
 	})
 
-	return append([]Finding(nil), validFindings...)
+	deduped := validFindings[:0]
+	for _, finding := range validFindings {
+		if len(deduped) == 0 {
+			deduped = append(deduped, finding)
+			continue
+		}
+
+		prev := deduped[len(deduped)-1]
+		if prev.Start == finding.Start && prev.End == finding.End {
+			if findingRank(finding) > findingRank(prev) {
+				deduped[len(deduped)-1] = finding
+				continue
+			}
+			if findingRank(finding) == findingRank(prev) && finding.Type < prev.Type {
+				deduped[len(deduped)-1] = finding
+			}
+			continue
+		}
+
+		deduped = append(deduped, finding)
+	}
+
+	return append([]Finding(nil), deduped...)
 }
 
 func (e *Engine) score(findings []Finding) int {
@@ -136,6 +159,29 @@ func (e *Engine) riskLevel(score int) RiskLevel {
 		return RiskLevelMed
 	}
 	return RiskLevelLow
+}
+
+func findingRank(finding Finding) int {
+	rank := severityRank(finding.Severity)
+	if !isGenericFindingType(finding.Type) {
+		rank += 100
+	}
+	return rank
+}
+
+func severityRank(severity Severity) int {
+	switch severity {
+	case SeverityHigh:
+		return 30
+	case SeverityMedium:
+		return 20
+	default:
+		return 10
+	}
+}
+
+func isGenericFindingType(findingType string) bool {
+	return findingType == FindingTypeEnvSecret || findingType == FindingTypeHighEntropyToken
 }
 
 type noopRedactor struct{}

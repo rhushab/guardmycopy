@@ -23,14 +23,15 @@ const (
 )
 
 type ScanDecision struct {
-	ActiveAppName string
-	Score         int
-	RiskLevel     core.RiskLevel
-	Action        config.Action
-	Findings      int
-	FindingTypes  []string
-	ContentHash   string
-	Allowlisted   bool
+	ActiveAppName     string
+	ActiveAppBundleID string
+	Score             int
+	RiskLevel         core.RiskLevel
+	Action            config.Action
+	Findings          int
+	FindingTypes      []string
+	ContentHash       string
+	Allowlisted       bool
 }
 
 type RuntimeStateStore interface {
@@ -73,6 +74,9 @@ func NewWithDependencies(
 	if cfg.PerApp == nil {
 		cfg.PerApp = map[string]config.Policy{}
 	}
+	if cfg.PerAppBundleID == nil {
+		cfg.PerAppBundleID = map[string]config.Policy{}
+	}
 	if cfg.Global.Thresholds.Med <= 0 {
 		cfg.Global.Thresholds.Med = defaults.Global.Thresholds.Med
 	}
@@ -114,14 +118,15 @@ func (s *Service) ScanCurrentDetailed() (ScanDecision, []string, error) {
 
 	decision, result := s.decide(current)
 	scanDecision := ScanDecision{
-		ActiveAppName: decision.ActiveAppName,
-		Score:         decision.Score,
-		RiskLevel:     decision.RiskLevel,
-		Action:        decision.Action,
-		Findings:      len(result.Findings),
-		FindingTypes:  findingTypes(result.Findings),
-		ContentHash:   hashToHex(currentHash),
-		Allowlisted:   result.Allowlisted,
+		ActiveAppName:     decision.ActiveAppName,
+		ActiveAppBundleID: decision.ActiveAppBundleID,
+		Score:             decision.Score,
+		RiskLevel:         decision.RiskLevel,
+		Action:            decision.Action,
+		Findings:          len(result.Findings),
+		FindingTypes:      findingTypes(result.Findings),
+		ContentHash:       hashToHex(currentHash),
+		Allowlisted:       result.Allowlisted,
 	}
 	s.writeAuditLog(scanDecision)
 	return scanDecision, s.decisionReasoning(decision, result), nil
@@ -154,8 +159,9 @@ func (s *Service) Sanitize(showDiff bool) (bool, error) {
 			result.Findings,
 		)
 		fmt.Printf(
-			"app=%q action=%s risk=%s score=%d findings=%d\n",
+			"app=%q bundle_id=%q action=%s risk=%s score=%d findings=%d\n",
 			decision.ActiveAppName,
+			decision.ActiveAppBundleID,
 			decision.Action,
 			decision.RiskLevel,
 			result.Score,
@@ -200,10 +206,9 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 	if interval <= 0 {
 		interval = s.cfg.PollInterval
 	}
-	interval = config.NormalizePollInterval(interval)
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	polling := newAdaptivePollBackoff(interval)
+	timer := time.NewTimer(polling.Current())
+	defer timer.Stop()
 
 	var lastSeenHash [32]byte
 	seen := false
@@ -211,17 +216,19 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-ticker.C:
+		case <-timer.C:
 			current, err := s.clipboard.ReadText()
 			if err != nil {
 				return fmt.Errorf("read clipboard: %w", err)
 			}
 			currentHash := hashText(current)
 			if seen && currentHash == lastSeenHash {
+				timer.Reset(polling.OnClipboardUnchanged())
 				continue
 			}
 			seen = true
 			lastSeenHash = currentHash
+			nextInterval := polling.OnClipboardChanged()
 
 			bypass, bypassReason, err := s.shouldBypassEnforcement()
 			if err != nil {
@@ -229,13 +236,15 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 			}
 			if bypass {
 				s.logVerbose("action=allow reason=%s", bypassReason)
+				timer.Reset(nextInterval)
 				continue
 			}
 
 			decision, result := s.decide(current)
 			s.logVerbose(
-				"app=%q action=%s risk=%s score=%d findings=%d",
+				"app=%q bundle_id=%q action=%s risk=%s score=%d findings=%d",
 				decision.ActiveAppName,
+				decision.ActiveAppBundleID,
 				decision.Action,
 				decision.RiskLevel,
 				decision.Score,
@@ -250,34 +259,37 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 				return err
 			}
 			s.writeAuditLog(ScanDecision{
-				ActiveAppName: decision.ActiveAppName,
-				Score:         decision.Score,
-				RiskLevel:     decision.RiskLevel,
-				Action:        decision.Action,
-				Findings:      len(result.Findings),
-				FindingTypes:  findingTypes(result.Findings),
-				ContentHash:   hashToHex(currentHash),
-				Allowlisted:   result.Allowlisted,
+				ActiveAppName:     decision.ActiveAppName,
+				ActiveAppBundleID: decision.ActiveAppBundleID,
+				Score:             decision.Score,
+				RiskLevel:         decision.RiskLevel,
+				Action:            decision.Action,
+				Findings:          len(result.Findings),
+				FindingTypes:      findingTypes(result.Findings),
+				ContentHash:       hashToHex(currentHash),
+				Allowlisted:       result.Allowlisted,
 			})
 			if changed {
 				lastSeenHash = hashText(nextValue)
 			}
+			timer.Reset(nextInterval)
 		}
 	}
 }
 
 func (s *Service) decide(text string) (PolicyDecision, policyResult) {
-	activeAppName := s.resolveActiveAppName()
-	result := s.analyze(text, activeAppName)
+	activeAppName, activeAppBundleID := s.resolveActiveApp()
+	result := s.analyze(text, activeAppName, activeAppBundleID)
 	if result.Allowlisted {
 		return PolicyDecision{
-			ActiveAppName: activeAppName,
-			Score:         0,
-			RiskLevel:     core.RiskLevelLow,
-			Action:        config.ActionAllow,
+			ActiveAppName:     activeAppName,
+			ActiveAppBundleID: activeAppBundleID,
+			Score:             0,
+			RiskLevel:         core.RiskLevelLow,
+			Action:            config.ActionAllow,
 		}, result
 	}
-	decision := s.policyResolver.Resolve(activeAppName, result.Score, result.RiskLevel)
+	decision := s.policyResolver.Resolve(activeAppName, activeAppBundleID, result.Score, result.RiskLevel)
 	return decision, result
 }
 
@@ -289,8 +301,8 @@ type policyResult struct {
 	Allowlisted   bool
 }
 
-func (s *Service) analyze(text string, activeAppName string) policyResult {
-	policy := s.cfg.PolicyForApp(activeAppName)
+func (s *Service) analyze(text string, activeAppName string, activeAppBundleID string) policyResult {
+	policy := s.cfg.PolicyForAppAndBundleID(activeAppName, activeAppBundleID)
 	if policy.IsAllowlisted(text) {
 		return policyResult{
 			Findings:      nil,
@@ -354,15 +366,15 @@ func scoreFindings(findings []core.Finding) int {
 	return score
 }
 
-func (s *Service) resolveActiveAppName() string {
+func (s *Service) resolveActiveApp() (appName string, bundleID string) {
 	if s.foregroundApp == nil {
-		return ""
+		return "", ""
 	}
-	activeAppName, err := s.foregroundApp.ActiveAppName()
+	activeAppName, activeAppBundleID, err := s.foregroundApp.ActiveApp()
 	if err != nil {
-		return ""
+		return "", ""
 	}
-	return activeAppName
+	return activeAppName, activeAppBundleID
 }
 
 func (s *Service) applyAction(
@@ -413,7 +425,7 @@ func (s *Service) notifyAction(decision PolicyDecision, clipboardHash [32]byte) 
 		return
 	}
 
-	appLabel := decision.ActiveAppName
+	appLabel := formatAppLabel(decision.ActiveAppName, decision.ActiveAppBundleID)
 	if appLabel == "" {
 		appLabel = "Unknown App"
 	}
@@ -537,9 +549,14 @@ func (s *Service) writeAuditLog(decision ScanDecision) {
 		return
 	}
 
+	appName := decision.ActiveAppName
+	if appName == "" {
+		appName = decision.ActiveAppBundleID
+	}
+
 	entry := auditlog.Entry{
 		Timestamp:    s.timeNow().UTC(),
-		App:          decision.ActiveAppName,
+		App:          appName,
 		Score:        decision.Score,
 		RiskLevel:    string(decision.RiskLevel),
 		FindingTypes: append([]string(nil), decision.FindingTypes...),
@@ -552,20 +569,30 @@ func (s *Service) writeAuditLog(decision ScanDecision) {
 }
 
 func (s *Service) decisionReasoning(decision PolicyDecision, result policyResult) []string {
-	if result.Allowlisted {
-		return []string{"clipboard matched allowlist regex; treated as allow"}
-	}
-	if len(result.Findings) == 0 {
-		return []string{
-			"no active findings after detector toggles and allowlist filtering",
-			fmt.Sprintf("policy resolved action=%s for risk=%s", decision.Action, decision.RiskLevel),
-		}
+	reasons := make([]string, 0, 3)
+	if appContext := formatAppContext(decision.ActiveAppName, decision.ActiveAppBundleID); appContext != "" {
+		reasons = append(reasons, appContext)
 	}
 
-	return []string{
+	if result.Allowlisted {
+		reasons = append(reasons, "clipboard matched allowlist regex; treated as allow")
+		return reasons
+	}
+	if len(result.Findings) == 0 {
+		reasons = append(
+			reasons,
+			"no active findings after detector toggles and allowlist filtering",
+			fmt.Sprintf("policy resolved action=%s for risk=%s", decision.Action, decision.RiskLevel),
+		)
+		return reasons
+	}
+
+	reasons = append(
+		reasons,
 		fmt.Sprintf("detectors=%s", strings.Join(detectorsTriggered(result.Findings), ",")),
 		fmt.Sprintf("policy resolved action=%s for risk=%s", decision.Action, decision.RiskLevel),
-	}
+	)
+	return reasons
 }
 
 func (s *Service) redactForDisplay(value string, findings []core.Finding) string {
@@ -573,4 +600,30 @@ func (s *Service) redactForDisplay(value string, findings []core.Finding) string
 		return value
 	}
 	return s.redactor.Redact(value, findings)
+}
+
+func formatAppContext(appName, bundleID string) string {
+	switch {
+	case appName != "" && bundleID != "":
+		return fmt.Sprintf("app=%q bundle_id=%q", appName, bundleID)
+	case appName != "":
+		return fmt.Sprintf("app=%q", appName)
+	case bundleID != "":
+		return fmt.Sprintf("bundle_id=%q", bundleID)
+	default:
+		return ""
+	}
+}
+
+func formatAppLabel(appName, bundleID string) string {
+	switch {
+	case appName != "" && bundleID != "":
+		return fmt.Sprintf("%s (%s)", appName, bundleID)
+	case appName != "":
+		return appName
+	case bundleID != "":
+		return bundleID
+	default:
+		return ""
+	}
 }

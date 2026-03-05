@@ -99,6 +99,42 @@ func TestEngineSanitizeNoFindings(t *testing.T) {
 	}
 }
 
+func TestEngineScanDetectsCommonTokenPack(t *testing.T) {
+	engine := New()
+
+	input := "Stripe key: sk_test_51NqkI2abcdefghijklmnopqrstuvwxABCD"
+	result := engine.Scan(input)
+
+	if len(result.Findings) == 0 {
+		t.Fatal("expected at least one finding")
+	}
+
+	foundStripe := false
+	for _, finding := range result.Findings {
+		if finding.Type == FindingTypeStripeSecretKey {
+			foundStripe = true
+			break
+		}
+	}
+	if !foundStripe {
+		t.Fatalf("expected finding type %q, got %#v", FindingTypeStripeSecretKey, result.Findings)
+	}
+}
+
+func TestEngineScanPrefersNamedTokenFindingOverGenericOverlap(t *testing.T) {
+	engine := New()
+
+	input := "GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyzABCDEF1234"
+	result := engine.Scan(input)
+
+	if len(result.Findings) != 1 {
+		t.Fatalf("expected one deduped finding, got %#v", result.Findings)
+	}
+	if result.Findings[0].Type != FindingTypeGitHubPATClassic {
+		t.Fatalf("unexpected finding type after dedupe: got %q want %q", result.Findings[0].Type, FindingTypeGitHubPATClassic)
+	}
+}
+
 func fixture(t *testing.T, name string) string {
 	t.Helper()
 

@@ -6,9 +6,9 @@ It continuously scans clipboard text for likely secrets and applies policy actio
 ## Scope
 
 What it does:
-- Detects likely sensitive text (PEM private keys, JWT-like tokens, env-style secrets, high-entropy tokens)
+- Detects likely sensitive text (PEM private keys, JWT-like tokens, env-style secrets, high-entropy tokens, and common service tokens such as AWS access key IDs, GitHub PATs, Slack tokens/webhooks, and Stripe secret keys)
 - Applies policy actions: `allow`, `warn`, `sanitize`, `block`
-- Supports per-app policy overrides (for example stricter browser/chat policies)
+- Supports per-app and per-app-bundle-id policy overrides (for example stricter browser/chat policies)
 - Provides optional local JSONL audit logging with hash-only clipboard representation
 
 What it does not do:
@@ -43,7 +43,7 @@ Out of scope:
 
 - Supported OS: **macOS only** (`darwin`)
 - Uses `pbpaste` / `pbcopy` for clipboard access
-- Uses `osascript` + `System Events` for foreground app and notifications
+- Uses `osascript` + `System Events` for foreground app name, bundle ID, and notifications
 - You may need Accessibility permission for your terminal/app:
   - `System Settings -> Privacy & Security -> Accessibility`
 
@@ -76,6 +76,27 @@ go build -o ./guardmycopy ./cmd/guardmycopy
 Notes:
 - Default poll interval: `500ms`
 - Minimum poll interval: `100ms` (lower values are clamped)
+- Adaptive idle backoff: after `4` consecutive unchanged polls, the run loop doubles the interval stepwise up to `2s` while idle, then resets immediately to the configured base interval on the next clipboard change
+
+### Manage macOS launch agent
+
+Install and bootstrap the launch agent:
+
+```bash
+./guardmycopy install
+```
+
+Check launch agent + runtime bypass state:
+
+```bash
+./guardmycopy status
+```
+
+Uninstall launch agent:
+
+```bash
+./guardmycopy uninstall
+```
 
 ## Install (local)
 
@@ -91,6 +112,7 @@ Use [`configs/example.yaml`](configs/example.yaml) as a base.
 Recommended policy style:
 - Strict for browsers/chat
 - More lenient for IDE/terminal
+- Use bundle-id overrides for app variants that share the same visible app name
 
 ```yaml
 global:
@@ -98,6 +120,17 @@ global:
   thresholds:
     med: 8
     high: 15
+  detector_toggles:
+    pem_private_key: true
+    jwt: true
+    env_secret: true
+    high_entropy_token: true
+    aws_access_key_id: true
+    github_pat_classic: true
+    github_pat_fine_grained: true
+    slack_token: true
+    slack_webhook: true
+    stripe_secret_key: true
   actions:
     low: allow
     med: sanitize
@@ -119,7 +152,20 @@ per_app:
     thresholds:
       med: 12
       high: 20
+    actions:
+      high: block
+
+per_app_bundle_id:
+  "com.google.Chrome":
+    actions:
+      med: warn
+      high: block
 ```
+
+Policy precedence:
+- `per_app_bundle_id` override (if bundle ID matches)
+- `per_app` override (if app name matches)
+- `global`
 
 ## Manual Verification Workflow (macOS)
 
@@ -147,7 +193,10 @@ printf '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n' | pbcopy
 ```bash
 ./guardmycopy run --audit-log
 ./guardmycopy log --tail 20
+./guardmycopy log stats --since 7d
 ```
+
+`log stats --since` requires a duration window and supports `d`, `h`, and `m` units.
 
 Expected audit location:
 - `$(os.UserConfigDir)/guardmycopy/audit.jsonl`

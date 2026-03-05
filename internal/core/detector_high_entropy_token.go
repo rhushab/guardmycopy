@@ -41,6 +41,9 @@ func (d *HighEntropyTokenDetector) Detect(text string) []Finding {
 	for _, finding := range NewEnvSecretDetector().Detect(text) {
 		excludedRanges = append(excludedRanges, []int{finding.Start, finding.End})
 	}
+	for _, finding := range NewCommonTokenPackDetector().Detect(text) {
+		excludedRanges = append(excludedRanges, []int{finding.Start, finding.End})
+	}
 
 	for _, candidate := range candidates {
 		start := candidate[0]

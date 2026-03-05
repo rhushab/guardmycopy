@@ -13,6 +13,12 @@ const (
 	FindingTypeJWT              = "jwt"
 	FindingTypeEnvSecret        = "env_secret"
 	FindingTypeHighEntropyToken = "high_entropy_token"
+	FindingTypeAWSAccessKeyID   = "aws_access_key_id"
+	FindingTypeGitHubPATClassic = "github_pat_classic"
+	FindingTypeGitHubPATFine    = "github_pat_fine_grained"
+	FindingTypeSlackToken       = "slack_token"
+	FindingTypeSlackWebhook     = "slack_webhook"
+	FindingTypeStripeSecretKey  = "stripe_secret_key"
 )
 
 type RiskLevel string
