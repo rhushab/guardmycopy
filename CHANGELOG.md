@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- CLI launch-agent lifecycle commands: `install`, `uninstall`, and `status`
+- `install` command support for rendering `scripts/macos/guardmycopy.plist` placeholders, writing `~/Library/LaunchAgents/com.guardmycopy.agent.plist`, creating log directory, and running `launchctl bootstrap gui/$(id -u)`
+- `status` output now includes launch-agent loaded/running state plus runtime bypass state (`snoozed-until`, `allow-once`) from persisted user state
+
+### Changed
+- Added explicit macOS-only guardrails for launch-agent lifecycle commands with clear errors on other operating systems
+
 ## [1.0.0-rc1] - 2026-03-04
 
 ### Added

@@ -77,6 +77,26 @@ Notes:
 - Default poll interval: `500ms`
 - Minimum poll interval: `100ms` (lower values are clamped)
 
+### Manage macOS launch agent
+
+Install and bootstrap the launch agent:
+
+```bash
+./guardmycopy install
+```
+
+Check launch agent + runtime bypass state:
+
+```bash
+./guardmycopy status
+```
+
+Uninstall launch agent:
+
+```bash
+./guardmycopy uninstall
+```
+
 ## Install (local)
 
 ```bash

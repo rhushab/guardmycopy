@@ -46,6 +46,12 @@ func run(args []string) int {
 		return runOnce(args[1:])
 	case "run":
 		return runLoop(args[1:])
+	case "install":
+		return runInstall(args[1:])
+	case "uninstall":
+		return runUninstall(args[1:])
+	case "status":
+		return runStatus(args[1:])
 	case "snooze":
 		return runSnooze(args[1:])
 	case "allow-once":
@@ -78,6 +84,15 @@ func runHelp(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "run":
 		printRunUsage(stdout)
+		return 0
+	case "install":
+		printInstallUsage(stdout)
+		return 0
+	case "uninstall":
+		printUninstallUsage(stdout)
+		return 0
+	case "status":
+		printStatusUsage(stdout)
 		return 0
 	case "snooze":
 		printSnoozeUsage(stdout)
@@ -547,6 +562,9 @@ Commands:
   sanitize    redact sensitive spans from stdin
   once        scan clipboard once and print the decision
   run         run continuous clipboard scanning
+  install     install and bootstrap the macOS launch agent
+  uninstall   boot out and remove the macOS launch agent
+  status      print launch agent and runtime bypass status
   snooze      disable enforcement for a duration (for example: 5m)
   allow-once  bypass enforcement for the next clipboard event
   log         print recent audit log entries
