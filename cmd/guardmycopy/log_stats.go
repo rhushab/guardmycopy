@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rhushabhbontapalle/guardmycopy/internal/auditlog"
+	"github.com/rhushab/guardmycopy/internal/auditlog"
 )
 
 type appActionCounts struct {

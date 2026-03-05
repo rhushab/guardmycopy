@@ -1,4 +1,4 @@
-module github.com/rhushabhbontapalle/guardmycopy
+module github.com/rhushab/guardmycopy
 
 go 1.22
 

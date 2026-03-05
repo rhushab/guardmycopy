@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rhushabhbontapalle/guardmycopy/internal/userstate"
+	"github.com/rhushab/guardmycopy/internal/userstate"
 )
 
 func TestRunInstallWithIOWritesPlistAndBootstraps(t *testing.T) {
@@ -84,6 +84,59 @@ func TestRunInstallWithIOWritesPlistAndBootstraps(t *testing.T) {
 	expected := []string{"bootstrap", "gui/501", plistPath}
 	if got := strings.Join(launchctlCalls[0], " "); strings.Join(expected, " ") != got {
 		t.Fatalf("unexpected launchctl args: got %q want %q", got, strings.Join(expected, " "))
+	}
+}
+
+func TestRunInstallWithIOUsesEmbeddedTemplateWhenTemplatePathUnset(t *testing.T) {
+	home := t.TempDir()
+	workDir := t.TempDir()
+
+	var launchctlCalls [][]string
+	deps := launchAgentDeps{
+		runtimeOS: "darwin",
+		executable: func() (string, error) {
+			return "/tmp/bin/guardmycopy", nil
+		},
+		cwd: func() (string, error) {
+			return workDir, nil
+		},
+		homeDir: func() (string, error) {
+			return home, nil
+		},
+		uid: func() int {
+			return 501
+		},
+		readFile: func(path string) ([]byte, error) {
+			t.Fatalf("readFile should not be called when templatePath is unset (path=%q)", path)
+			return nil, nil
+		},
+		runLaunchctl: func(args ...string) (string, error) {
+			launchctlCalls = append(launchctlCalls, append([]string(nil), args...))
+			return "", nil
+		},
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runInstallWithIO(nil, &stdout, &stderr, deps)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
+	}
+
+	plistPath := filepath.Join(home, "Library", "LaunchAgents", launchAgentLabel+".plist")
+	plistBytes, err := os.ReadFile(plistPath)
+	if err != nil {
+		t.Fatalf("read installed plist: %v", err)
+	}
+	plist := string(plistBytes)
+	if !strings.Contains(plist, "/tmp/bin/guardmycopy") {
+		t.Fatalf("expected binary path in plist, got %q", plist)
+	}
+	if !strings.Contains(plist, workDir) {
+		t.Fatalf("expected workdir in plist, got %q", plist)
+	}
+	if len(launchctlCalls) != 1 {
+		t.Fatalf("expected one launchctl call, got %d", len(launchctlCalls))
 	}
 }
 

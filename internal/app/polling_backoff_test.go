@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rhushabhbontapalle/guardmycopy/internal/config"
+	"github.com/rhushab/guardmycopy/internal/config"
 )
 
 func TestAdaptivePollBackoffStartsAtNormalizedBase(t *testing.T) {

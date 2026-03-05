@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/xml"
 	"errors"
 	"flag"
@@ -13,17 +14,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rhushabhbontapalle/guardmycopy/internal/userstate"
+	"github.com/rhushab/guardmycopy/internal/userstate"
 )
 
 const (
-	launchAgentLabel        = "com.guardmycopy.agent"
-	launchAgentTemplatePath = "scripts/macos/guardmycopy.plist"
+	launchAgentLabel = "com.guardmycopy.agent"
 )
+
+//go:embed guardmycopy.plist
+var embeddedLaunchAgentTemplate []byte
 
 type launchAgentDeps struct {
 	runtimeOS    string
 	templatePath string
+	templateData []byte
 	executable   func() (string, error)
 	cwd          func() (string, error)
 	homeDir      func() (string, error)
@@ -44,8 +48,8 @@ func (d launchAgentDeps) withDefaults() launchAgentDeps {
 	if strings.TrimSpace(d.runtimeOS) == "" {
 		d.runtimeOS = runtime.GOOS
 	}
-	if strings.TrimSpace(d.templatePath) == "" {
-		d.templatePath = launchAgentTemplatePath
+	if len(d.templateData) == 0 {
+		d.templateData = embeddedLaunchAgentTemplate
 	}
 	if d.executable == nil {
 		d.executable = os.Executable
@@ -219,9 +223,9 @@ func installLaunchAgent(stdout io.Writer, deps launchAgentDeps) error {
 		return err
 	}
 
-	templateBytes, err := deps.readFile(deps.templatePath)
+	templateBytes, err := deps.loadLaunchAgentTemplate()
 	if err != nil {
-		return fmt.Errorf("read plist template %q: %w", deps.templatePath, err)
+		return err
 	}
 
 	binPath, err := deps.executable()
@@ -285,6 +289,20 @@ func installLaunchAgent(stdout io.Writer, deps launchAgentDeps) error {
 
 	fmt.Fprintf(stdout, "installed launch agent %q at %s\n", launchAgentLabel, plistPath)
 	return nil
+}
+
+func (d launchAgentDeps) loadLaunchAgentTemplate() ([]byte, error) {
+	if templatePath := strings.TrimSpace(d.templatePath); templatePath != "" {
+		templateBytes, err := d.readFile(templatePath)
+		if err != nil {
+			return nil, fmt.Errorf("read plist template %q: %w", templatePath, err)
+		}
+		return templateBytes, nil
+	}
+	if len(d.templateData) == 0 {
+		return nil, errors.New("embedded plist template is empty")
+	}
+	return d.templateData, nil
 }
 
 func uninstallLaunchAgent(stdout io.Writer, deps launchAgentDeps) error {

@@ -1,8 +1,8 @@
 package app
 
 import (
-	"github.com/rhushabhbontapalle/guardmycopy/internal/config"
-	"github.com/rhushabhbontapalle/guardmycopy/internal/core"
+	"github.com/rhushab/guardmycopy/internal/config"
+	"github.com/rhushab/guardmycopy/internal/core"
 )
 
 type PolicyDecision struct {

@@ -3,7 +3,7 @@ package app
 import (
 	"time"
 
-	"github.com/rhushabhbontapalle/guardmycopy/internal/config"
+	"github.com/rhushab/guardmycopy/internal/config"
 )
 
 const (

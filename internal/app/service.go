@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rhushabhbontapalle/guardmycopy/internal/auditlog"
-	"github.com/rhushabhbontapalle/guardmycopy/internal/config"
-	"github.com/rhushabhbontapalle/guardmycopy/internal/core"
-	"github.com/rhushabhbontapalle/guardmycopy/internal/platform"
-	"github.com/rhushabhbontapalle/guardmycopy/internal/userstate"
+	"github.com/rhushab/guardmycopy/internal/auditlog"
+	"github.com/rhushab/guardmycopy/internal/config"
+	"github.com/rhushab/guardmycopy/internal/core"
+	"github.com/rhushab/guardmycopy/internal/platform"
+	"github.com/rhushab/guardmycopy/internal/userstate"
 )
 
 const (

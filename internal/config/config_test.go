@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rhushabhbontapalle/guardmycopy/internal/core"
+	"github.com/rhushab/guardmycopy/internal/core"
 )
 
 func TestLoadDefaultsWhenDefaultFileMissing(t *testing.T) {

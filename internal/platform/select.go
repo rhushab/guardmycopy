@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/rhushabhbontapalle/guardmycopy/internal/platform/darwin"
+	"github.com/rhushab/guardmycopy/internal/platform/darwin"
 )
 
 type Adapters struct {

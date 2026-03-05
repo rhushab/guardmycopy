@@ -3,8 +3,8 @@ package app
 import (
 	"testing"
 
-	"github.com/rhushabhbontapalle/guardmycopy/internal/config"
-	"github.com/rhushabhbontapalle/guardmycopy/internal/core"
+	"github.com/rhushab/guardmycopy/internal/config"
+	"github.com/rhushab/guardmycopy/internal/core"
 )
 
 func TestPolicyResolverUsesThresholdsFromScore(t *testing.T) {

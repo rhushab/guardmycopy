@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rhushabhbontapalle/guardmycopy/internal/auditlog"
+	"github.com/rhushab/guardmycopy/internal/auditlog"
 )
 
 func TestParseSinceDuration(t *testing.T) {

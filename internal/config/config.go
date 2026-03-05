@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rhushabhbontapalle/guardmycopy/internal/core"
+	"github.com/rhushab/guardmycopy/internal/core"
 	"gopkg.in/yaml.v3"
 )
 
