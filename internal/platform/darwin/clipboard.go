@@ -12,30 +12,34 @@ import (
 
 const commandTimeout = 2 * time.Second
 
-type Clipboard struct{}
+type pasteboardClient interface {
+	ReadText() (string, error)
+	WriteText(value string) error
+	ChangeCount() (int64, error)
+}
+
+type Clipboard struct {
+	client pasteboardClient
+}
 
 func NewClipboard() *Clipboard {
-	return &Clipboard{}
+	return newClipboardWithClient(newPasteboardClient())
 }
 
 func (c *Clipboard) ReadText() (string, error) {
-	out, err := commandOutput("pbpaste")
-	if err != nil {
-		return "", fmt.Errorf("pbpaste failed: %w", err)
-	}
-	return string(out), nil
+	return c.client.ReadText()
 }
 
 func (c *Clipboard) WriteText(value string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
-	defer cancel()
+	return c.client.WriteText(value)
+}
 
-	cmd := exec.CommandContext(ctx, "pbcopy")
-	cmd.Stdin = strings.NewReader(value)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("pbcopy failed: %w", commandErr("pbcopy", err, ctx.Err()))
-	}
-	return nil
+func (c *Clipboard) ChangeCount() (int64, error) {
+	return c.client.ChangeCount()
+}
+
+func newClipboardWithClient(client pasteboardClient) *Clipboard {
+	return &Clipboard{client: client}
 }
 
 type ForegroundApp struct{}
