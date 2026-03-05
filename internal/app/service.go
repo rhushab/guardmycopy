@@ -206,10 +206,9 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 	if interval <= 0 {
 		interval = s.cfg.PollInterval
 	}
-	interval = config.NormalizePollInterval(interval)
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	polling := newAdaptivePollBackoff(interval)
+	timer := time.NewTimer(polling.Current())
+	defer timer.Stop()
 
 	var lastSeenHash [32]byte
 	seen := false
@@ -217,17 +216,19 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-ticker.C:
+		case <-timer.C:
 			current, err := s.clipboard.ReadText()
 			if err != nil {
 				return fmt.Errorf("read clipboard: %w", err)
 			}
 			currentHash := hashText(current)
 			if seen && currentHash == lastSeenHash {
+				timer.Reset(polling.OnClipboardUnchanged())
 				continue
 			}
 			seen = true
 			lastSeenHash = currentHash
+			nextInterval := polling.OnClipboardChanged()
 
 			bypass, bypassReason, err := s.shouldBypassEnforcement()
 			if err != nil {
@@ -235,6 +236,7 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 			}
 			if bypass {
 				s.logVerbose("action=allow reason=%s", bypassReason)
+				timer.Reset(nextInterval)
 				continue
 			}
 
@@ -270,6 +272,7 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 			if changed {
 				lastSeenHash = hashText(nextValue)
 			}
+			timer.Reset(nextInterval)
 		}
 	}
 }

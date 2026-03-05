@@ -76,6 +76,7 @@ go build -o ./guardmycopy ./cmd/guardmycopy
 Notes:
 - Default poll interval: `500ms`
 - Minimum poll interval: `100ms` (lower values are clamped)
+- Adaptive idle backoff: after `4` consecutive unchanged polls, the run loop doubles the interval stepwise up to `2s` while idle, then resets immediately to the configured base interval on the next clipboard change
 
 ### Manage macOS launch agent
 
