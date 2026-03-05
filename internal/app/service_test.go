@@ -1022,3 +1022,104 @@ func TestScanCurrentDetailedWritesAuditAppContextMetadataOnFailure(t *testing.T)
 		t.Fatalf("unexpected app context error: %q", metadata.Error)
 	}
 }
+
+func TestRunRecordsEnforcementHealthOnClipboardWriteFailure(t *testing.T) {
+	clip := &mockClipboardWithChangeDetector{
+		mockClipboard: &mockClipboard{
+			value: "hello",
+		},
+		changeCounts: []int64{1, 2, 2},
+	}
+	clip.changeCountHook = func(call int) {
+		if call == 2 {
+			clip.value = "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"
+		}
+	}
+
+	stateStore := &mockRuntimeStateStore{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	clip.writeHook = func(attempt int) {
+		switch attempt {
+		case 1:
+			clip.writeErr = errors.New("pasteboard temporarily unavailable")
+		default:
+			clip.writeErr = nil
+			cancel()
+			clip.writeHook = nil
+		}
+	}
+
+	var warnings bytes.Buffer
+	svc := New(config.Defaults(), clip)
+	svc.SetRuntimeStateStore(stateStore)
+	svc.SetWarningOutput(&warnings)
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+
+	state := stateStore.state
+	if state.ConsecutiveErrors != 0 {
+		t.Fatalf("expected consecutive errors reset to 0 after recovery, got %d", state.ConsecutiveErrors)
+	}
+	if state.LastEnforcementError != "" {
+		t.Fatalf("expected enforcement error cleared after recovery, got %q", state.LastEnforcementError)
+	}
+}
+
+func TestRunRecordsEnforcementHealthDegradedOnPersistentWriteFailure(t *testing.T) {
+	clip := &mockClipboardWithChangeDetector{
+		mockClipboard: &mockClipboard{
+			value: "hello",
+		},
+		changeCounts: []int64{1, 2, 2, 2},
+	}
+	clip.changeCountHook = func(call int) {
+		if call == 2 {
+			clip.value = "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"
+		}
+	}
+
+	stateStore := &mockRuntimeStateStore{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writeAttempts := 0
+	clip.writeHook = func(attempt int) {
+		writeAttempts++
+		clip.writeErr = errors.New("pasteboard temporarily unavailable")
+		if writeAttempts >= 2 {
+			cancel()
+		}
+	}
+
+	var warnings bytes.Buffer
+	svc := New(config.Defaults(), clip)
+	svc.SetRuntimeStateStore(stateStore)
+	svc.SetWarningOutput(&warnings)
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+
+	state := stateStore.state
+	if state.ConsecutiveErrors < 1 {
+		t.Fatalf("expected consecutive errors > 0, got %d", state.ConsecutiveErrors)
+	}
+	if state.LastEnforcementError == "" {
+		t.Fatal("expected non-empty enforcement error in state")
+	}
+	if !strings.Contains(state.LastEnforcementError, "write clipboard") {
+		t.Fatalf("expected clipboard write error message, got %q", state.LastEnforcementError)
+	}
+	if state.LastEnforcementErrorAt.IsZero() {
+		t.Fatal("expected non-zero enforcement error timestamp")
+	}
+	if !state.EnforcementDegraded() {
+		t.Fatal("expected EnforcementDegraded() to return true")
+	}
+}

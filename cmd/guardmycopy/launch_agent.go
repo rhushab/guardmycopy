@@ -227,6 +227,15 @@ func runStatusWithIO(args []string, stdout, stderr io.Writer, deps launchAgentDe
 	fmt.Fprintf(stdout, "snoozed-until=%s\n", snoozedUntil)
 	fmt.Fprintf(stdout, "allow-once=%t\n", state.AllowOnce)
 
+	if state.EnforcementDegraded() {
+		fmt.Fprintf(stdout, "enforcement-status=degraded\n")
+		fmt.Fprintf(stdout, "last-enforcement-error=%q\n", state.LastEnforcementError)
+		fmt.Fprintf(stdout, "last-enforcement-error-at=%s\n", state.LastEnforcementErrorAt.UTC().Format(time.RFC3339))
+		fmt.Fprintf(stdout, "consecutive-enforcement-errors=%d\n", state.ConsecutiveErrors)
+	} else {
+		fmt.Fprintf(stdout, "enforcement-status=healthy\n")
+	}
+
 	foregroundStatus, appName, bundleID, appErr := detectForegroundAppHealth(deps.activeApp)
 	fmt.Fprintf(stdout, "foreground-app-context=%s\n", foregroundStatus)
 	if appName != "" {
