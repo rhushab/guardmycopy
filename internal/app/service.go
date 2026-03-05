@@ -242,6 +242,7 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 	var lastSeenHash [32]byte
 	var lastSeenAppContext activeAppContext
 	var lastSeenChangeCount int64
+	var lastSeenSnoozeActive bool
 	seen := false
 	for {
 		select {
@@ -252,6 +253,11 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 			if err != nil {
 				return err
 			}
+			state, err := s.loadRuntimeState()
+			if err != nil {
+				return err
+			}
+			snoozeActive := state.SnoozeActive(s.timeNow())
 
 			appResolution := activeAppResolution{
 				status: AppContextStatusUnavailable,
@@ -260,7 +266,7 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 			if seen && hasChangeCount && currentChangeCount == lastSeenChangeCount {
 				appResolution = s.resolveActiveApp()
 				appResolutionLoaded = true
-				if appResolution.context == lastSeenAppContext {
+				if appResolution.context == lastSeenAppContext && snoozeActive == lastSeenSnoozeActive {
 					timer.Reset(polling.OnClipboardUnchanged())
 					continue
 				}
@@ -274,7 +280,10 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 			if !appResolutionLoaded {
 				appResolution = s.resolveActiveApp()
 			}
-			if seen && currentHash == lastSeenHash && appResolution.context == lastSeenAppContext {
+			clipboardOrAppChanged := !seen ||
+				currentHash != lastSeenHash ||
+				appResolution.context != lastSeenAppContext
+			if !clipboardOrAppChanged && snoozeActive == lastSeenSnoozeActive {
 				if hasChangeCount {
 					lastSeenChangeCount = currentChangeCount
 				}
@@ -284,12 +293,13 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 			seen = true
 			lastSeenHash = currentHash
 			lastSeenAppContext = appResolution.context
+			lastSeenSnoozeActive = snoozeActive
 			if hasChangeCount {
 				lastSeenChangeCount = currentChangeCount
 			}
 			nextInterval := polling.OnClipboardChanged()
 
-			bypass, bypassReason, err := s.shouldBypassEnforcement()
+			bypass, bypassReason, err := s.shouldBypassEnforcementWithState(state, clipboardOrAppChanged)
 			if err != nil {
 				return err
 			}
@@ -333,10 +343,6 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 			timer.Reset(nextInterval)
 		}
 	}
-}
-
-func (s *Service) decide(text string) (PolicyDecision, policyResult) {
-	return s.decideWithActiveAppResolution(text, s.resolveActiveApp())
 }
 
 func (s *Service) decideWithActiveAppResolution(
@@ -620,28 +626,46 @@ func cloneActions(input map[core.RiskLevel]config.Action) map[core.RiskLevel]con
 	return out
 }
 
-func (s *Service) shouldBypassEnforcement() (bool, string, error) {
+func (s *Service) loadRuntimeState() (userstate.State, error) {
 	if s.stateStore == nil {
-		return false, "", nil
+		return userstate.State{}, nil
 	}
 
 	state, err := s.stateStore.Load()
 	if err != nil {
-		return false, "", fmt.Errorf("load runtime state: %w", err)
+		return userstate.State{}, fmt.Errorf("load runtime state: %w", err)
+	}
+	return state, nil
+}
+
+func (s *Service) shouldBypassEnforcement() (bool, string, error) {
+	state, err := s.loadRuntimeState()
+	if err != nil {
+		return false, "", err
+	}
+	return s.shouldBypassEnforcementWithState(state, true)
+}
+
+func (s *Service) shouldBypassEnforcementWithState(
+	state userstate.State,
+	allowOnceEligible bool,
+) (bool, string, error) {
+	if s.stateStore == nil {
+		return false, "", nil
 	}
 
 	now := s.timeNow()
-	if !state.SnoozedUntil.IsZero() && state.SnoozedUntil.After(now) {
-		return true, fmt.Sprintf("snoozed until %s", state.SnoozedUntil.Local().Format(time.RFC3339)), nil
+	if snoozedUntil, ok := state.ActiveSnoozedUntil(now); ok {
+		return true, fmt.Sprintf("snoozed until %s", snoozedUntil.Local().Format(time.RFC3339)), nil
 	}
 
 	dirty := false
-	if !state.SnoozedUntil.IsZero() && !state.SnoozedUntil.After(now) {
+	if !state.SnoozedUntil.IsZero() {
 		state.SnoozedUntil = time.Time{}
 		dirty = true
 	}
 
-	if state.AllowOnce {
+	if state.AllowOnce && allowOnceEligible {
 		state.AllowOnce = false
 		dirty = true
 		if err := s.stateStore.Save(state); err != nil {

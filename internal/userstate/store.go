@@ -22,6 +22,18 @@ type State struct {
 	AllowOnce    bool      `json:"allow_once"`
 }
 
+func (s State) ActiveSnoozedUntil(now time.Time) (time.Time, bool) {
+	if s.SnoozedUntil.IsZero() || !s.SnoozedUntil.After(now) {
+		return time.Time{}, false
+	}
+	return s.SnoozedUntil, true
+}
+
+func (s State) SnoozeActive(now time.Time) bool {
+	_, ok := s.ActiveSnoozedUntil(now)
+	return ok
+}
+
 type Store struct {
 	path string
 }
