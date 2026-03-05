@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,12 @@ type testClipboard struct {
 	value string
 }
 
+type testForegroundApp struct {
+	name     string
+	bundleID string
+	err      error
+}
+
 func (t *testClipboard) ReadText() (string, error) {
 	return t.value, nil
 }
@@ -25,6 +32,13 @@ func (t *testClipboard) ReadText() (string, error) {
 func (t *testClipboard) WriteText(value string) error {
 	t.value = value
 	return nil
+}
+
+func (t *testForegroundApp) ActiveApp() (string, string, error) {
+	if t.err != nil {
+		return "", "", t.err
+	}
+	return t.name, t.bundleID, nil
 }
 
 func TestRunSanitizeWithIO(t *testing.T) {
@@ -133,6 +147,28 @@ func TestRunOnceWithServiceVerbosePrintsReasoning(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "reason=") {
 		t.Fatalf("expected verbose reasoning in stderr, got %q", stderr.String())
+	}
+}
+
+func TestRunOnceWithServiceForegroundAppFailureIsVisible(t *testing.T) {
+	clip := &testClipboard{value: "hello\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nworld"}
+	foreground := &testForegroundApp{err: errors.New("osascript active app failed: accessibility denied")}
+	svc := app.NewWithDependencies(config.Defaults(), clip, foreground, nil)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runOnceWithService(svc, &stdout, &stderr, true)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
+	}
+	if !strings.Contains(stdout.String(), "policy_source=global_fallback_app_detection_failed") {
+		t.Fatalf("expected global fallback policy source in stdout, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "app_context_status=resolution_failed") {
+		t.Fatalf("expected app context failure status in stdout, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "global policy was used because app context could not be resolved; per-app overrides were skipped") {
+		t.Fatalf("expected explicit fallback reasoning in stderr, got %q", stderr.String())
 	}
 }
 

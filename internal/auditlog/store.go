@@ -19,13 +19,20 @@ const (
 )
 
 type Entry struct {
-	Timestamp    time.Time `json:"timestamp"`
-	App          string    `json:"app"`
-	Score        int       `json:"score"`
-	RiskLevel    string    `json:"riskLevel"`
-	FindingTypes []string  `json:"findingTypes"`
-	Action       string    `json:"action"`
-	ContentHash  string    `json:"contentHash"`
+	Timestamp    time.Time           `json:"timestamp"`
+	App          string              `json:"app"`
+	Score        int                 `json:"score"`
+	RiskLevel    string              `json:"riskLevel"`
+	FindingTypes []string            `json:"findingTypes"`
+	Action       string              `json:"action"`
+	ContentHash  string              `json:"contentHash"`
+	AppContext   *AppContextMetadata `json:"appContext,omitempty"`
+}
+
+type AppContextMetadata struct {
+	Status       string `json:"status"`
+	PolicySource string `json:"policySource,omitempty"`
+	Error        string `json:"error,omitempty"`
 }
 
 type Store struct {

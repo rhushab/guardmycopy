@@ -18,8 +18,17 @@ import (
 )
 
 const (
-	blockedClipboardValue = "[GUARDMYCOPY BLOCKED]"
-	alertDebounceWindow   = time.Second
+	blockedClipboardValue        = "[GUARDMYCOPY BLOCKED]"
+	alertDebounceWindow          = time.Second
+	runtimeWarningDebounceWindow = 30 * time.Second
+)
+
+type AppContextStatus string
+
+const (
+	AppContextStatusResolved         AppContextStatus = "resolved"
+	AppContextStatusUnavailable      AppContextStatus = "unavailable"
+	AppContextStatusResolutionFailed AppContextStatus = "resolution_failed"
 )
 
 type ScanDecision struct {
@@ -28,15 +37,24 @@ type ScanDecision struct {
 	Score             int
 	RiskLevel         core.RiskLevel
 	Action            config.Action
+	PolicySource      PolicySource
 	Findings          int
 	FindingTypes      []string
 	ContentHash       string
 	Allowlisted       bool
+	AppContextStatus  AppContextStatus
+	AppContextError   string
 }
 
 type activeAppContext struct {
 	name     string
 	bundleID string
+}
+
+type activeAppResolution struct {
+	context activeAppContext
+	status  AppContextStatus
+	err     error
 }
 
 type RuntimeStateStore interface {
@@ -49,20 +67,23 @@ type AuditLogStore interface {
 }
 
 type Service struct {
-	cfg             config.Config
-	clipboard       platform.Clipboard
-	clipboardChange platform.ClipboardChangeDetector
-	engine          *core.Engine
-	redactor        core.Redactor
-	policyResolver  *PolicyResolver
-	foregroundApp   platform.ForegroundApp
-	notifier        platform.Notifier
-	alertDebounce   time.Duration
-	lastAlertByHash map[[32]byte]time.Time
-	timeNow         func() time.Time
-	stateStore      RuntimeStateStore
-	auditLogStore   AuditLogStore
-	verboseOutput   io.Writer
+	cfg              config.Config
+	clipboard        platform.Clipboard
+	clipboardChange  platform.ClipboardChangeDetector
+	engine           *core.Engine
+	redactor         core.Redactor
+	policyResolver   *PolicyResolver
+	foregroundApp    platform.ForegroundApp
+	notifier         platform.Notifier
+	alertDebounce    time.Duration
+	lastAlertByHash  map[[32]byte]time.Time
+	timeNow          func() time.Time
+	stateStore       RuntimeStateStore
+	auditLogStore    AuditLogStore
+	verboseOutput    io.Writer
+	warningOutput    io.Writer
+	warningDebounce  time.Duration
+	lastWarningByKey map[string]time.Time
 }
 
 func New(cfg config.Config, clipboard platform.Clipboard) *Service {
@@ -97,16 +118,18 @@ func NewWithDependencies(
 	}
 
 	service := &Service{
-		cfg:             cfg,
-		clipboard:       clipboard,
-		engine:          core.New(),
-		redactor:        core.NewFormatPreservingRedactor(),
-		policyResolver:  NewPolicyResolver(cfg),
-		foregroundApp:   foregroundApp,
-		notifier:        notifier,
-		alertDebounce:   alertDebounceWindow,
-		lastAlertByHash: make(map[[32]byte]time.Time),
-		timeNow:         time.Now,
+		cfg:              cfg,
+		clipboard:        clipboard,
+		engine:           core.New(),
+		redactor:         core.NewFormatPreservingRedactor(),
+		policyResolver:   NewPolicyResolver(cfg),
+		foregroundApp:    foregroundApp,
+		notifier:         notifier,
+		alertDebounce:    alertDebounceWindow,
+		lastAlertByHash:  make(map[[32]byte]time.Time),
+		warningDebounce:  runtimeWarningDebounceWindow,
+		lastWarningByKey: make(map[string]time.Time),
+		timeNow:          time.Now,
 	}
 	if detector, ok := clipboard.(platform.ClipboardChangeDetector); ok {
 		service.clipboardChange = detector
@@ -125,20 +148,10 @@ func (s *Service) ScanCurrentDetailed() (ScanDecision, []string, error) {
 		return ScanDecision{}, nil, fmt.Errorf("read clipboard: %w", err)
 	}
 	currentHash := hashText(current)
-	appContext := s.currentActiveApp()
+	appResolution := s.resolveActiveApp()
 
-	decision, result := s.decideWithAppContext(current, appContext)
-	scanDecision := ScanDecision{
-		ActiveAppName:     decision.ActiveAppName,
-		ActiveAppBundleID: decision.ActiveAppBundleID,
-		Score:             decision.Score,
-		RiskLevel:         decision.RiskLevel,
-		Action:            decision.Action,
-		Findings:          len(result.Findings),
-		FindingTypes:      findingTypes(result.Findings),
-		ContentHash:       hashToHex(currentHash),
-		Allowlisted:       result.Allowlisted,
-	}
+	decision, result := s.decideWithActiveAppResolution(current, appResolution)
+	scanDecision := s.newScanDecision(decision, result, currentHash)
 	s.writeAuditLog(scanDecision)
 	return scanDecision, s.decisionReasoning(decision, result), nil
 }
@@ -155,14 +168,18 @@ func (s *Service) SetVerboseOutput(output io.Writer) {
 	s.verboseOutput = output
 }
 
+func (s *Service) SetWarningOutput(output io.Writer) {
+	s.warningOutput = output
+}
+
 func (s *Service) Sanitize(showDiff bool) (bool, error) {
 	current, err := s.clipboard.ReadText()
 	if err != nil {
 		return false, fmt.Errorf("read clipboard: %w", err)
 	}
-	appContext := s.currentActiveApp()
+	appResolution := s.resolveActiveApp()
 
-	decision, result := s.decideWithAppContext(current, appContext)
+	decision, result := s.decideWithActiveAppResolution(current, appResolution)
 
 	if showDiff {
 		safeBefore := s.redactForDisplay(current, result.Findings)
@@ -236,12 +253,14 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 				return err
 			}
 
-			appContext := activeAppContext{}
-			appContextLoaded := false
+			appResolution := activeAppResolution{
+				status: AppContextStatusUnavailable,
+			}
+			appResolutionLoaded := false
 			if seen && hasChangeCount && currentChangeCount == lastSeenChangeCount {
-				appContext = s.currentActiveApp()
-				appContextLoaded = true
-				if appContext == lastSeenAppContext {
+				appResolution = s.resolveActiveApp()
+				appResolutionLoaded = true
+				if appResolution.context == lastSeenAppContext {
 					timer.Reset(polling.OnClipboardUnchanged())
 					continue
 				}
@@ -252,10 +271,10 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 				return fmt.Errorf("read clipboard: %w", err)
 			}
 			currentHash := hashText(current)
-			if !appContextLoaded {
-				appContext = s.currentActiveApp()
+			if !appResolutionLoaded {
+				appResolution = s.resolveActiveApp()
 			}
-			if seen && currentHash == lastSeenHash && appContext == lastSeenAppContext {
+			if seen && currentHash == lastSeenHash && appResolution.context == lastSeenAppContext {
 				if hasChangeCount {
 					lastSeenChangeCount = currentChangeCount
 				}
@@ -264,7 +283,7 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 			}
 			seen = true
 			lastSeenHash = currentHash
-			lastSeenAppContext = appContext
+			lastSeenAppContext = appResolution.context
 			if hasChangeCount {
 				lastSeenChangeCount = currentChangeCount
 			}
@@ -280,15 +299,17 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 				continue
 			}
 
-			decision, result := s.decideWithAppContext(current, appContext)
+			decision, result := s.decideWithActiveAppResolution(current, appResolution)
 			s.logVerbose(
-				"app=%q bundle_id=%q action=%s risk=%s score=%d findings=%d",
+				"app=%q bundle_id=%q action=%s risk=%s score=%d findings=%d policy_source=%s app_context_status=%s",
 				decision.ActiveAppName,
 				decision.ActiveAppBundleID,
 				decision.Action,
 				decision.RiskLevel,
 				decision.Score,
 				len(result.Findings),
+				decision.PolicySource,
+				decision.AppContextStatus,
 			)
 			for _, reason := range s.decisionReasoning(decision, result) {
 				s.logVerbose("reason=%s", reason)
@@ -298,17 +319,7 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 			if err != nil {
 				return err
 			}
-			s.writeAuditLog(ScanDecision{
-				ActiveAppName:     decision.ActiveAppName,
-				ActiveAppBundleID: decision.ActiveAppBundleID,
-				Score:             decision.Score,
-				RiskLevel:         decision.RiskLevel,
-				Action:            decision.Action,
-				Findings:          len(result.Findings),
-				FindingTypes:      findingTypes(result.Findings),
-				ContentHash:       hashToHex(currentHash),
-				Allowlisted:       result.Allowlisted,
-			})
+			s.writeAuditLog(s.newScanDecision(decision, result, currentHash))
 			if changed {
 				lastSeenHash = hashText(nextValue)
 				currentChangeCount, hasChangeCount, err = s.currentClipboardChangeCount()
@@ -325,21 +336,40 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 }
 
 func (s *Service) decide(text string) (PolicyDecision, policyResult) {
-	return s.decideWithAppContext(text, s.currentActiveApp())
+	return s.decideWithActiveAppResolution(text, s.resolveActiveApp())
 }
 
-func (s *Service) decideWithAppContext(text string, appContext activeAppContext) (PolicyDecision, policyResult) {
-	result := s.analyze(text, appContext.name, appContext.bundleID)
-	if result.Allowlisted {
-		return PolicyDecision{
-			ActiveAppName:     appContext.name,
-			ActiveAppBundleID: appContext.bundleID,
-			Score:             0,
-			RiskLevel:         core.RiskLevelLow,
-			Action:            config.ActionAllow,
-		}, result
+func (s *Service) decideWithActiveAppResolution(
+	text string,
+	appResolution activeAppResolution,
+) (PolicyDecision, policyResult) {
+	policy, policySource := s.policyResolver.policyForAppAndBundleID(
+		appResolution.context.name,
+		appResolution.context.bundleID,
+	)
+	if appResolution.status == AppContextStatusResolutionFailed && policySource == PolicySourceGlobal {
+		policySource = PolicySourceGlobalFallbackAppDetectionFailed
 	}
-	decision := s.policyResolver.Resolve(appContext.name, appContext.bundleID, result.Score, result.RiskLevel)
+
+	result := s.analyze(text, policy)
+	decision := PolicyDecision{
+		ActiveAppName:     appResolution.context.name,
+		ActiveAppBundleID: appResolution.context.bundleID,
+		PolicySource:      policySource,
+		AppContextStatus:  appResolution.status,
+	}
+	if appResolution.err != nil {
+		decision.AppContextError = appResolution.err.Error()
+	}
+	if result.Allowlisted {
+		decision.Score = 0
+		decision.RiskLevel = core.RiskLevelLow
+		decision.Action = config.ActionAllow
+		return decision, result
+	}
+	decision.Score = result.Score
+	decision.RiskLevel = riskFromScore(result.Score, policy.Thresholds, result.RiskLevel)
+	decision.Action = policy.ActionForRisk(decision.RiskLevel)
 	return decision, result
 }
 
@@ -351,8 +381,7 @@ type policyResult struct {
 	Allowlisted   bool
 }
 
-func (s *Service) analyze(text string, activeAppName string, activeAppBundleID string) policyResult {
-	policy := s.cfg.PolicyForAppAndBundleID(activeAppName, activeAppBundleID)
+func (s *Service) analyze(text string, policy config.Policy) policyResult {
 	if policy.IsAllowlisted(text) {
 		return policyResult{
 			Findings:      nil,
@@ -416,15 +445,31 @@ func scoreFindings(findings []core.Finding) int {
 	return score
 }
 
-func (s *Service) currentActiveApp() activeAppContext {
+func (s *Service) resolveActiveApp() activeAppResolution {
 	if s.foregroundApp == nil {
-		return activeAppContext{}
+		return activeAppResolution{status: AppContextStatusUnavailable}
 	}
 	activeAppName, activeAppBundleID, err := s.foregroundApp.ActiveApp()
 	if err != nil {
-		return activeAppContext{}
+		s.warnRuntime(
+			"foreground-app:"+err.Error(),
+			"foreground app detection failed; using global policy until app context is available: %v",
+			err,
+		)
+		return activeAppResolution{
+			status: AppContextStatusResolutionFailed,
+			err:    err,
+		}
 	}
-	return activeAppContext{name: activeAppName, bundleID: activeAppBundleID}
+	activeAppName = strings.TrimSpace(activeAppName)
+	activeAppBundleID = strings.TrimSpace(activeAppBundleID)
+	if activeAppName == "" && activeAppBundleID == "" {
+		return activeAppResolution{status: AppContextStatusUnavailable}
+	}
+	return activeAppResolution{
+		context: activeAppContext{name: activeAppName, bundleID: activeAppBundleID},
+		status:  AppContextStatusResolved,
+	}
 }
 
 func (s *Service) currentClipboardChangeCount() (count int64, ok bool, err error) {
@@ -621,6 +666,60 @@ func (s *Service) logVerbose(format string, args ...any) {
 	_, _ = fmt.Fprintf(s.verboseOutput, format+"\n", args...)
 }
 
+func (s *Service) warnRuntime(key string, format string, args ...any) {
+	if s.warningOutput == nil {
+		return
+	}
+	if !s.shouldWarn(key) {
+		return
+	}
+	_, _ = fmt.Fprintf(s.warningOutput, "warning: "+format+"\n", args...)
+}
+
+func (s *Service) shouldWarn(key string) bool {
+	if s.warningDebounce <= 0 {
+		return true
+	}
+
+	now := s.timeNow()
+	s.evictExpiredWarnings(now)
+	last, ok := s.lastWarningByKey[key]
+	if ok && now.Sub(last) < s.warningDebounce {
+		return false
+	}
+	s.lastWarningByKey[key] = now
+	return true
+}
+
+func (s *Service) evictExpiredWarnings(now time.Time) {
+	for key, last := range s.lastWarningByKey {
+		if now.Sub(last) >= s.warningDebounce {
+			delete(s.lastWarningByKey, key)
+		}
+	}
+}
+
+func (s *Service) newScanDecision(
+	decision PolicyDecision,
+	result policyResult,
+	currentHash [32]byte,
+) ScanDecision {
+	return ScanDecision{
+		ActiveAppName:     decision.ActiveAppName,
+		ActiveAppBundleID: decision.ActiveAppBundleID,
+		Score:             decision.Score,
+		RiskLevel:         decision.RiskLevel,
+		Action:            decision.Action,
+		PolicySource:      decision.PolicySource,
+		Findings:          len(result.Findings),
+		FindingTypes:      findingTypes(result.Findings),
+		ContentHash:       hashToHex(currentHash),
+		Allowlisted:       result.Allowlisted,
+		AppContextStatus:  decision.AppContextStatus,
+		AppContextError:   decision.AppContextError,
+	}
+}
+
 func (s *Service) writeAuditLog(decision ScanDecision) {
 	if s.auditLogStore == nil {
 		return
@@ -640,16 +739,30 @@ func (s *Service) writeAuditLog(decision ScanDecision) {
 		Action:       string(decision.Action),
 		ContentHash:  decision.ContentHash,
 	}
+	if metadata := auditlogMetadataForDecision(decision); metadata != nil {
+		entry.AppContext = metadata
+	}
 	if err := s.auditLogStore.Log(entry); err != nil {
 		s.logVerbose("audit log write failed: %v", err)
 	}
 }
 
 func (s *Service) decisionReasoning(decision PolicyDecision, result policyResult) []string {
-	reasons := make([]string, 0, 3)
+	reasons := make([]string, 0, 6)
 	if appContext := formatAppContext(decision.ActiveAppName, decision.ActiveAppBundleID); appContext != "" {
 		reasons = append(reasons, appContext)
 	}
+	switch decision.AppContextStatus {
+	case AppContextStatusResolutionFailed:
+		reasons = append(
+			reasons,
+			fmt.Sprintf("foreground app detection failed: %s", decision.AppContextError),
+			"global policy was used because app context could not be resolved; per-app overrides were skipped",
+		)
+	case AppContextStatusUnavailable:
+		reasons = append(reasons, "foreground app context unavailable; using global policy")
+	}
+	reasons = append(reasons, fmt.Sprintf("policy_source=%s", decision.PolicySource))
 
 	if result.Allowlisted {
 		reasons = append(reasons, "clipboard matched allowlist regex; treated as allow")
@@ -670,6 +783,21 @@ func (s *Service) decisionReasoning(decision PolicyDecision, result policyResult
 		fmt.Sprintf("policy resolved action=%s for risk=%s", decision.Action, decision.RiskLevel),
 	)
 	return reasons
+}
+
+func auditlogMetadataForDecision(decision ScanDecision) *auditlog.AppContextMetadata {
+	if decision.AppContextStatus == AppContextStatusResolved {
+		return nil
+	}
+
+	metadata := &auditlog.AppContextMetadata{
+		Status:       string(decision.AppContextStatus),
+		PolicySource: string(decision.PolicySource),
+	}
+	if decision.AppContextError != "" {
+		metadata.Error = decision.AppContextError
+	}
+	return metadata
 }
 
 func (s *Service) redactForDisplay(value string, findings []core.Finding) string {

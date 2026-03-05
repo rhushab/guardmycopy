@@ -272,6 +272,7 @@ func runLoop(args []string) int {
 	if *verbose {
 		svc.SetVerboseOutput(os.Stderr)
 	}
+	svc.SetWarningOutput(os.Stderr)
 	if *once {
 		return runOnceWithService(svc, os.Stdout, os.Stderr, *verbose)
 	}
@@ -342,13 +343,15 @@ func runOnceWithService(svc *app.Service, stdout, stderr io.Writer, verbose bool
 
 	fmt.Fprintf(
 		stdout,
-		"app=%q bundle_id=%q action=%s risk=%s score=%d findings=%d\n",
+		"app=%q bundle_id=%q action=%s risk=%s score=%d findings=%d policy_source=%s app_context_status=%s\n",
 		decision.ActiveAppName,
 		decision.ActiveAppBundleID,
 		decision.Action,
 		decision.RiskLevel,
 		decision.Score,
 		decision.Findings,
+		decision.PolicySource,
+		decision.AppContextStatus,
 	)
 	if verbose {
 		for _, line := range reasoning {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -455,6 +456,47 @@ func TestRunAppSwitchWithoutActionableChangeDoesNotRewriteClipboard(t *testing.T
 	}
 	if notifier.calls != 1 {
 		t.Fatalf("expected no extra notification after app switch, got %d", notifier.calls)
+	}
+}
+
+func TestRunVerboseReportsForegroundAppFailureFallback(t *testing.T) {
+	cfg := config.Defaults()
+	slackPolicy := copyPolicy(cfg.Global)
+	slackPolicy.Actions[core.RiskLevelHigh] = config.ActionAllow
+	cfg.PerApp["Slack"] = slackPolicy
+
+	clip := &mockClipboard{
+		value: "prefix\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nsuffix",
+	}
+	foreground := &mockForegroundApp{err: errors.New("osascript active app failed: accessibility denied")}
+
+	svc := NewWithDependencies(cfg, clip, foreground, nil)
+
+	var verbose bytes.Buffer
+	var warnings bytes.Buffer
+	svc.SetVerboseOutput(&verbose)
+	svc.SetWarningOutput(&warnings)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	clip.readHook = func() {
+		cancel()
+		clip.readHook = nil
+	}
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if !strings.Contains(verbose.String(), "policy_source=global_fallback_app_detection_failed") {
+		t.Fatalf("expected fallback policy source in verbose output, got %q", verbose.String())
+	}
+	if !strings.Contains(verbose.String(), "reason=global policy was used because app context could not be resolved; per-app overrides were skipped") {
+		t.Fatalf("expected explicit fallback reasoning in verbose output, got %q", verbose.String())
+	}
+	if !strings.Contains(warnings.String(), "warning: foreground app detection failed; using global policy until app context is available") {
+		t.Fatalf("expected runtime warning output, got %q", warnings.String())
 	}
 }
 

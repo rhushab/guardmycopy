@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rhushab/guardmycopy/internal/app"
+	"github.com/rhushab/guardmycopy/internal/platform"
 	"github.com/rhushab/guardmycopy/internal/userstate"
 )
 
@@ -38,6 +40,7 @@ type launchAgentDeps struct {
 	stat         func(string) (os.FileInfo, error)
 	remove       func(string) error
 	runLaunchctl func(args ...string) (string, error)
+	activeApp    func() (string, string, error)
 }
 
 func defaultLaunchAgentDeps() launchAgentDeps {
@@ -80,6 +83,18 @@ func (d launchAgentDeps) withDefaults() launchAgentDeps {
 	}
 	if d.runLaunchctl == nil {
 		d.runLaunchctl = runLaunchctlCommand
+	}
+	if d.activeApp == nil {
+		d.activeApp = func() (string, string, error) {
+			adapters, err := platform.Select()
+			if err != nil {
+				return "", "", err
+			}
+			if adapters.ForegroundApp == nil {
+				return "", "", errors.New("foreground app adapter unavailable")
+			}
+			return adapters.ForegroundApp.ActiveApp()
+		}
 	}
 	return d
 }
@@ -210,6 +225,18 @@ func runStatusWithIO(args []string, stdout, stderr io.Writer, deps launchAgentDe
 	fmt.Fprintf(stdout, "launch-agent-running=%t\n", running)
 	fmt.Fprintf(stdout, "snoozed-until=%s\n", snoozedUntil)
 	fmt.Fprintf(stdout, "allow-once=%t\n", state.AllowOnce)
+
+	foregroundStatus, appName, bundleID, appErr := detectForegroundAppHealth(deps.activeApp)
+	fmt.Fprintf(stdout, "foreground-app-context=%s\n", foregroundStatus)
+	if appName != "" {
+		fmt.Fprintf(stdout, "foreground-app=%q\n", appName)
+	}
+	if bundleID != "" {
+		fmt.Fprintf(stdout, "foreground-app-bundle-id=%q\n", bundleID)
+	}
+	if appErr != nil {
+		fmt.Fprintf(stdout, "foreground-app-error=%q\n", appErr.Error())
+	}
 	return 0
 }
 
@@ -455,4 +482,22 @@ func printUninstallUsage(w io.Writer) {
 func printStatusUsage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, `Usage:
   guardmycopy status`)
+}
+
+func detectForegroundAppHealth(activeApp func() (string, string, error)) (app.AppContextStatus, string, string, error) {
+	if activeApp == nil {
+		return app.AppContextStatusUnavailable, "", "", nil
+	}
+
+	appName, bundleID, err := activeApp()
+	if err != nil {
+		return app.AppContextStatusResolutionFailed, "", "", err
+	}
+
+	appName = strings.TrimSpace(appName)
+	bundleID = strings.TrimSpace(bundleID)
+	if appName == "" && bundleID == "" {
+		return app.AppContextStatusUnavailable, "", "", nil
+	}
+	return app.AppContextStatusResolved, appName, bundleID, nil
 }
