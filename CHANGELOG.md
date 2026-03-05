@@ -6,11 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - CLI launch-agent lifecycle commands: `install`, `uninstall`, and `status`
-- `install` command support for rendering `scripts/macos/guardmycopy.plist` placeholders, writing `~/Library/LaunchAgents/com.guardmycopy.agent.plist`, creating log directory, and running `launchctl bootstrap gui/$(id -u)`
+- `install` command support for rendering an embedded launch-agent plist template, writing `~/Library/LaunchAgents/com.guardmycopy.agent.plist`, creating log directory, and running `launchctl bootstrap gui/$(id -u)`
 - `status` output now includes launch-agent loaded/running state plus runtime bypass state (`snoozed-until`, `allow-once`) from persisted user state
 - `log stats --since <duration>` command for local audit analytics (top blocked/warned apps, risk-level counts, and recent block reasons) with safe skipping of malformed JSONL lines
 - Added a common token pack detector for AWS access key IDs, GitHub PATs (classic + fine-grained), Slack tokens/webhooks, and Stripe secret keys with distinct finding types and config toggles
 - Added optional `per_app_bundle_id` policy overrides with precedence `bundle_id > app name > global`, plus macOS foreground bundle-id resolution in decision context
+- Homebrew tap formula at `Formula/guardmycopy.rb` for source installs via `brew`
 
 ### Changed
 - Added explicit macOS-only guardrails for launch-agent lifecycle commands with clear errors on other operating systems

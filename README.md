@@ -98,7 +98,20 @@ Uninstall launch agent:
 ./guardmycopy uninstall
 ```
 
-## Install (local)
+## Install (Homebrew tap)
+
+Tap this repository and install:
+
+```bash
+brew tap rhushab/guardmycopy https://github.com/rhushab/guardmycopy
+brew install rhushab/guardmycopy/guardmycopy
+```
+
+Notes:
+- The tap formula tracks the `main` branch and builds from source.
+- `go` is installed automatically as a build dependency.
+
+## Install (manual local)
 
 ```bash
 go build -o ./guardmycopy ./cmd/guardmycopy

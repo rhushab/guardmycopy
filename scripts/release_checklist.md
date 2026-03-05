@@ -59,4 +59,13 @@ Include:
 
 - Verify CI green on tagged commit.
 - Verify binary build from tag on macOS.
+- Verify Homebrew tap install:
+
+```bash
+brew update
+brew tap rhushab/guardmycopy https://github.com/rhushab/guardmycopy
+brew reinstall rhushab/guardmycopy/guardmycopy
+guardmycopy version
+```
+
 - Track first user issues for detector tuning.
