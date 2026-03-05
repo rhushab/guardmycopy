@@ -81,3 +81,41 @@ func TestStoreSaveUsesPrivatePermissions(t *testing.T) {
 		t.Fatalf("expected private state file permissions, got %o", got)
 	}
 }
+
+func TestStoreSaveOverwritesExistingStateWithoutTempLeak(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := New(path)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	if err := store.Save(State{AllowOnce: true}); err != nil {
+		t.Fatalf("first Save returned error: %v", err)
+	}
+
+	want := State{
+		SnoozedUntil: time.Unix(1_700_000_100, 0).UTC(),
+	}
+	if err := store.Save(want); err != nil {
+		t.Fatalf("second Save returned error: %v", err)
+	}
+
+	got, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if !got.SnoozedUntil.Equal(want.SnoozedUntil) {
+		t.Fatalf("unexpected snoozed_until: got %s want %s", got.SnoozedUntil, want.SnoozedUntil)
+	}
+	if got.AllowOnce {
+		t.Fatal("expected allow_once to be overwritten")
+	}
+
+	matches, err := filepath.Glob(path + ".tmp-*")
+	if err != nil {
+		t.Fatalf("glob temp files: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("expected no temporary state files, found %v", matches)
+	}
+}

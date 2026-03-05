@@ -95,9 +95,45 @@ func (s *Store) Save(state State) error {
 	}
 	payload = append(payload, '\n')
 
-	if err := os.WriteFile(s.path, payload, defaultStateFileMode); err != nil {
+	if err := writeFileAtomically(s.path, payload, defaultStateFileMode); err != nil {
 		return fmt.Errorf("write state file: %w", err)
 	}
 
+	return nil
+}
+
+func writeFileAtomically(path string, content []byte, perm os.FileMode) error {
+	tempFile, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tempPath := tempFile.Name()
+	cleanupTemp := true
+	defer func() {
+		if cleanupTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	if _, err := tempFile.Write(content); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Chmod(perm); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Sync(); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		return err
+	}
+
+	cleanupTemp = false
 	return nil
 }

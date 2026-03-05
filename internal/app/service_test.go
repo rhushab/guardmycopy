@@ -439,6 +439,88 @@ func TestRunStopsWhenContextCanceled(t *testing.T) {
 	}
 }
 
+func TestRunContinuesAfterTransientClipboardChangeCountFailure(t *testing.T) {
+	clip := &mockClipboardWithChangeDetector{
+		mockClipboard: &mockClipboard{
+			value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend",
+		},
+		changeCountErr: errors.New("pasteboard temporarily unavailable"),
+	}
+	clip.changeCountHook = func(call int) {
+		if call > 1 {
+			clip.changeCountErr = nil
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	clip.readHook = func() {
+		cancel()
+		clip.readHook = nil
+	}
+
+	var warnings bytes.Buffer
+	svc := New(config.Defaults(), clip)
+	svc.SetWarningOutput(&warnings)
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if clip.reads != 1 {
+		t.Fatalf("expected one clipboard read after change count failure, got %d", clip.reads)
+	}
+	if clip.writes != 1 {
+		t.Fatalf("expected enforcement to continue after change count failure, got %d writes", clip.writes)
+	}
+	if !strings.Contains(warnings.String(), "clipboard change count unavailable") {
+		t.Fatalf("expected change count warning, got %q", warnings.String())
+	}
+}
+
+func TestRunContinuesAfterTransientClipboardReadFailure(t *testing.T) {
+	clip := &mockClipboard{
+		value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend",
+	}
+	clip.readHook = func() {
+		switch clip.reads {
+		case 1:
+			clip.readErr = errors.New("pasteboard temporarily unavailable")
+		default:
+			clip.readErr = nil
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	initialHook := clip.readHook
+	clip.readHook = func() {
+		initialHook()
+		if clip.reads == 2 {
+			cancel()
+			clip.readHook = nil
+		}
+	}
+
+	var warnings bytes.Buffer
+	svc := New(config.Defaults(), clip)
+	svc.SetWarningOutput(&warnings)
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if clip.reads != 2 {
+		t.Fatalf("expected run to retry after read failure, got %d reads", clip.reads)
+	}
+	if clip.writes != 1 {
+		t.Fatalf("expected enforcement after retry, got %d writes", clip.writes)
+	}
+	if !strings.Contains(warnings.String(), "clipboard read failed; retrying") {
+		t.Fatalf("expected clipboard read warning, got %q", warnings.String())
+	}
+}
+
 func TestShouldBypassEnforcementSnoozed(t *testing.T) {
 	clip := &mockClipboard{value: "secret"}
 	svc := New(config.Defaults(), clip)
