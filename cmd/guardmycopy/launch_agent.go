@@ -39,6 +39,7 @@ type launchAgentDeps struct {
 	writeFile    func(string, []byte, os.FileMode) error
 	mkdirAll     func(string, os.FileMode) error
 	stat         func(string) (os.FileInfo, error)
+	rename       func(string, string) error
 	remove       func(string) error
 	runLaunchctl func(args ...string) (string, error)
 	activeApp    func() (string, string, error)
@@ -81,6 +82,9 @@ func (d launchAgentDeps) withDefaults() launchAgentDeps {
 	}
 	if d.stat == nil {
 		d.stat = os.Stat
+	}
+	if d.rename == nil {
+		d.rename = os.Rename
 	}
 	if d.remove == nil {
 		d.remove = os.Remove
@@ -310,21 +314,128 @@ func installLaunchAgent(stdout io.Writer, deps launchAgentDeps) error {
 		return fmt.Errorf("plist template still contains placeholders: %s", strings.Join(unresolved, ", "))
 	}
 
-	if err := deps.writeFile(plistPath, []byte(rendered), 0o644); err != nil {
-		return fmt.Errorf("write launch agent plist: %w", err)
+	previousPlist, previousExists, err := readLaunchAgentPlist(deps, plistPath)
+	if err != nil {
+		return err
+	}
+
+	wasLoaded, err := unloadLaunchAgent(deps)
+	if err != nil {
+		return err
+	}
+
+	if err := writeLaunchAgentPlist(plistPath, []byte(rendered), 0o644, deps); err != nil {
+		installErr := fmt.Errorf("write launch agent plist: %w", err)
+		if rollbackErr := rollbackLaunchAgentInstall(plistPath, previousPlist, previousExists, wasLoaded, deps); rollbackErr != nil {
+			return combineLaunchAgentInstallErrors(installErr, rollbackErr)
+		}
+		return installErr
 	}
 
 	domain := launchAgentDomain(deps.uid())
 	out, err := deps.runLaunchctl("bootstrap", domain, plistPath)
 	if err != nil {
-		if strings.TrimSpace(out) != "" {
-			return fmt.Errorf("launchctl bootstrap %s failed: %s (%w)", domain, out, err)
+		installErr := launchctlFailure("bootstrap", domain, out, err)
+		if rollbackErr := rollbackLaunchAgentInstall(plistPath, previousPlist, previousExists, wasLoaded, deps); rollbackErr != nil {
+			return combineLaunchAgentInstallErrors(installErr, rollbackErr)
 		}
-		return fmt.Errorf("launchctl bootstrap %s failed: %w", domain, err)
+		return installErr
 	}
 
 	fmt.Fprintf(stdout, "installed launch agent %q at %s\n", launchAgentLabel, plistPath)
 	return nil
+}
+
+func readLaunchAgentPlist(deps launchAgentDeps, plistPath string) ([]byte, bool, error) {
+	plistBytes, err := deps.readFile(plistPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("read existing launch agent plist: %w", err)
+	}
+	return plistBytes, true, nil
+}
+
+func unloadLaunchAgent(deps launchAgentDeps) (bool, error) {
+	target := launchAgentTarget(deps.uid())
+	out, err := deps.runLaunchctl("bootout", target)
+	if err != nil {
+		if isLaunchctlNotFound(out) {
+			return false, nil
+		}
+		return false, launchctlFailure("bootout", target, out, err)
+	}
+	return true, nil
+}
+
+func rollbackLaunchAgentInstall(plistPath string, previousPlist []byte, previousExists, wasLoaded bool, deps launchAgentDeps) error {
+	if err := restoreLaunchAgentPlist(plistPath, previousPlist, previousExists, deps); err != nil {
+		return err
+	}
+	if !wasLoaded {
+		return nil
+	}
+	if !previousExists {
+		return errors.New("restore previously loaded launch agent: previous plist was missing")
+	}
+
+	domain := launchAgentDomain(deps.uid())
+	out, err := deps.runLaunchctl("bootstrap", domain, plistPath)
+	if err != nil {
+		return launchctlFailure("bootstrap", domain, out, err)
+	}
+	return nil
+}
+
+func restoreLaunchAgentPlist(plistPath string, previousPlist []byte, previousExists bool, deps launchAgentDeps) error {
+	if !previousExists {
+		if err := deps.remove(plistPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove launch agent plist during rollback: %w", err)
+		}
+		return nil
+	}
+
+	if err := writeLaunchAgentPlist(plistPath, previousPlist, 0o644, deps); err != nil {
+		return fmt.Errorf("restore launch agent plist: %w", err)
+	}
+	return nil
+}
+
+func writeLaunchAgentPlist(path string, content []byte, perm os.FileMode, deps launchAgentDeps) error {
+	tempFile, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tempPath := tempFile.Name()
+	cleanupTemp := true
+	defer func() {
+		if cleanupTemp {
+			_ = deps.remove(tempPath)
+		}
+	}()
+
+	if _, err := tempFile.Write(content); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Chmod(perm); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Close(); err != nil {
+		return err
+	}
+	if err := deps.rename(tempPath, path); err != nil {
+		return err
+	}
+
+	cleanupTemp = false
+	return nil
+}
+
+func combineLaunchAgentInstallErrors(installErr, rollbackErr error) error {
+	return fmt.Errorf("%w; rollback failed: %v", installErr, rollbackErr)
 }
 
 func (d launchAgentDeps) loadLaunchAgentTemplate() ([]byte, error) {
@@ -373,18 +484,22 @@ func uninstallLaunchAgent(stdout io.Writer, deps launchAgentDeps) error {
 }
 
 func launchAgentStatus(deps launchAgentDeps) (bool, bool, error) {
-	target := fmt.Sprintf("%s/%s", launchAgentDomain(deps.uid()), launchAgentLabel)
+	target := launchAgentTarget(deps.uid())
 	out, err := deps.runLaunchctl("print", target)
 	if err != nil {
 		if isLaunchctlNotFound(out) {
 			return false, false, nil
 		}
-		if strings.TrimSpace(out) != "" {
-			return false, false, fmt.Errorf("launchctl print %s failed: %s (%w)", target, out, err)
-		}
-		return false, false, fmt.Errorf("launchctl print %s failed: %w", target, err)
+		return false, false, launchctlFailure("print", target, out, err)
 	}
 	return true, launchAgentRunning(out), nil
+}
+
+func launchctlFailure(command, target, output string, err error) error {
+	if strings.TrimSpace(output) != "" {
+		return fmt.Errorf("launchctl %s %s failed: %s (%w)", command, target, output, err)
+	}
+	return fmt.Errorf("launchctl %s %s failed: %w", command, target, err)
 }
 
 func launchAgentRunning(output string) bool {
@@ -445,6 +560,10 @@ func isLaunchctlNotFound(output string) bool {
 
 func launchAgentDomain(uid int) string {
 	return fmt.Sprintf("gui/%d", uid)
+}
+
+func launchAgentTarget(uid int) string {
+	return fmt.Sprintf("%s/%s", launchAgentDomain(uid), launchAgentLabel)
 }
 
 func requireDarwinCommand(commandName, runtimeOS string) error {
