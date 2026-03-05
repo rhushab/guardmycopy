@@ -85,6 +85,9 @@ type Service struct {
 	warningDebounce          time.Duration
 	lastWarningByKey         map[string]time.Time
 	pendingAllowOnceConsumed bool
+	consecutiveErrors        int
+	lastEnforcementError     string
+	lastEnforcementErrorAt   time.Time
 }
 
 func New(cfg config.Config, clipboard platform.Clipboard) *Service {
@@ -337,10 +340,12 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 				lastSeenAppContext = previousLastSeenAppContext
 				lastSeenChangeCount = previousLastSeenChangeCount
 				lastSeenSnoozeActive = previousLastSeenSnoozeActive
+				s.recordEnforcementError(err.Error())
 				s.warnRuntime("clipboard-write", "clipboard write failed; keeping enforcement active and retrying: %v", err)
 				timer.Reset(polling.OnClipboardChanged())
 				continue
 			}
+			s.clearEnforcementHealth()
 			s.writeAuditLog(s.newScanDecision(decision, result, currentHash))
 			if changed {
 				lastSeenHash = hashText(nextValue)
@@ -749,6 +754,37 @@ func (s *Service) saveRuntimeState(state userstate.State) error {
 		return nil
 	}
 	return s.stateStore.Save(state)
+}
+
+func (s *Service) recordEnforcementError(errMsg string) {
+	s.consecutiveErrors++
+	s.lastEnforcementError = errMsg
+	s.lastEnforcementErrorAt = s.timeNow()
+	s.persistEnforcementHealth()
+}
+
+func (s *Service) clearEnforcementHealth() {
+	if s.consecutiveErrors == 0 {
+		return
+	}
+	s.consecutiveErrors = 0
+	s.lastEnforcementError = ""
+	s.lastEnforcementErrorAt = time.Time{}
+	s.persistEnforcementHealth()
+}
+
+func (s *Service) persistEnforcementHealth() {
+	if s.stateStore == nil {
+		return
+	}
+	state, err := s.stateStore.Load()
+	if err != nil {
+		return
+	}
+	state.LastEnforcementError = s.lastEnforcementError
+	state.LastEnforcementErrorAt = s.lastEnforcementErrorAt
+	state.ConsecutiveErrors = s.consecutiveErrors
+	_ = s.stateStore.Save(state)
 }
 
 func (s *Service) logVerbose(format string, args ...any) {

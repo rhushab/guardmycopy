@@ -18,8 +18,15 @@ const (
 )
 
 type State struct {
-	SnoozedUntil time.Time `json:"snoozed_until,omitempty"`
-	AllowOnce    bool      `json:"allow_once"`
+	SnoozedUntil           time.Time `json:"snoozed_until,omitempty"`
+	AllowOnce              bool      `json:"allow_once"`
+	LastEnforcementError   string    `json:"last_enforcement_error,omitempty"`
+	LastEnforcementErrorAt time.Time `json:"last_enforcement_error_at,omitempty"`
+	ConsecutiveErrors      int       `json:"consecutive_errors,omitempty"`
+}
+
+func (s State) EnforcementDegraded() bool {
+	return s.ConsecutiveErrors > 0 && s.LastEnforcementError != ""
 }
 
 func (s State) ActiveSnoozedUntil(now time.Time) (time.Time, bool) {

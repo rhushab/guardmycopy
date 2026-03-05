@@ -681,6 +681,83 @@ func TestRunStatusWithIONonDarwin(t *testing.T) {
 	}
 }
 
+func TestRunStatusWithIOReportsHealthyEnforcement(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	store, err := userstate.New(statePath)
+	if err != nil {
+		t.Fatalf("new userstate store: %v", err)
+	}
+	if err := store.Save(userstate.State{}); err != nil {
+		t.Fatalf("save userstate: %v", err)
+	}
+
+	deps := launchAgentDeps{
+		runtimeOS: "darwin",
+		runLaunchctl: func(args ...string) (string, error) {
+			return "state = running\npid = 123", nil
+		},
+		activeApp: func() (string, string, error) {
+			return "Google Chrome", "com.google.Chrome", nil
+		},
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runStatusWithIO(nil, &stdout, &stderr, deps, statePath)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "enforcement-status=healthy") {
+		t.Fatalf("expected enforcement-status=healthy, got %q", stdout.String())
+	}
+}
+
+func TestRunStatusWithIOReportsDegradedEnforcement(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	store, err := userstate.New(statePath)
+	if err != nil {
+		t.Fatalf("new userstate store: %v", err)
+	}
+	errorTime := time.Unix(1_700_000_000, 0).UTC()
+	if err := store.Save(userstate.State{
+		LastEnforcementError:   "write clipboard: pasteboard temporarily unavailable",
+		LastEnforcementErrorAt: errorTime,
+		ConsecutiveErrors:      3,
+	}); err != nil {
+		t.Fatalf("save userstate: %v", err)
+	}
+
+	deps := launchAgentDeps{
+		runtimeOS: "darwin",
+		runLaunchctl: func(args ...string) (string, error) {
+			return "state = running\npid = 123", nil
+		},
+		activeApp: func() (string, string, error) {
+			return "Google Chrome", "com.google.Chrome", nil
+		},
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runStatusWithIO(nil, &stdout, &stderr, deps, statePath)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "enforcement-status=degraded") {
+		t.Fatalf("expected enforcement-status=degraded, got %q", out)
+	}
+	if !strings.Contains(out, `last-enforcement-error="write clipboard: pasteboard temporarily unavailable"`) {
+		t.Fatalf("expected last-enforcement-error, got %q", out)
+	}
+	if !strings.Contains(out, "last-enforcement-error-at="+errorTime.Format(time.RFC3339)) {
+		t.Fatalf("expected last-enforcement-error-at, got %q", out)
+	}
+	if !strings.Contains(out, "consecutive-enforcement-errors=3") {
+		t.Fatalf("expected consecutive-enforcement-errors=3, got %q", out)
+	}
+}
+
 func TestLaunchAgentRunning(t *testing.T) {
 	tests := []struct {
 		name   string
