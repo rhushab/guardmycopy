@@ -12,12 +12,16 @@ import (
 )
 
 type mockForegroundApp struct {
-	name     string
-	bundleID string
-	err      error
+	name      string
+	bundleID  string
+	err       error
+	activeApp func() (string, string, error)
 }
 
 func (m *mockForegroundApp) ActiveApp() (string, string, error) {
+	if m.activeApp != nil {
+		return m.activeApp()
+	}
 	if m.err != nil {
 		return "", "", m.err
 	}
@@ -140,6 +144,210 @@ func TestRunUsesBundleIDOverrideBeforePerApp(t *testing.T) {
 	}
 	if entry.App != "Google Chrome" {
 		t.Fatalf("expected app name in audit entry, got %q", entry.App)
+	}
+}
+
+func TestRunReevaluatesOnUnchangedClipboardWhenForegroundAppChanges(t *testing.T) {
+	cfg := config.Defaults()
+
+	terminalPolicy := copyPolicy(cfg.Global)
+	terminalPolicy.Actions[core.RiskLevelHigh] = config.ActionAllow
+	cfg.PerApp["iTerm2"] = terminalPolicy
+
+	slackPolicy := copyPolicy(cfg.Global)
+	slackPolicy.Actions[core.RiskLevelHigh] = config.ActionBlock
+	cfg.PerApp["Slack"] = slackPolicy
+
+	clip := &mockClipboard{
+		value: "prefix\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nsuffix",
+	}
+	notifier := &mockNotifier{}
+	currentApp := struct {
+		name     string
+		bundleID string
+	}{
+		name:     "iTerm2",
+		bundleID: "com.googlecode.iterm2",
+	}
+	foreground := &mockForegroundApp{
+		activeApp: func() (string, string, error) {
+			return currentApp.name, currentApp.bundleID, nil
+		},
+	}
+	auditStore := &mockAuditLogStore{}
+
+	svc := NewWithDependencies(cfg, clip, foreground, notifier)
+	svc.SetAuditLogStore(auditStore)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	readCount := 0
+	clip.readHook = func() {
+		readCount++
+		if readCount == 2 {
+			currentApp.name = "Slack"
+			currentApp.bundleID = "com.tinyspeck.slackmacgap"
+			cancel()
+			clip.readHook = nil
+		}
+	}
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if clip.writes != 1 {
+		t.Fatalf("expected one clipboard write after app switch, got %d", clip.writes)
+	}
+	if clip.value != blockedClipboardValue {
+		t.Fatalf("expected blocked clipboard marker, got %q", clip.value)
+	}
+	if notifier.calls != 1 {
+		t.Fatalf("expected one notification, got %d", notifier.calls)
+	}
+	if len(auditStore.entries) != 2 {
+		t.Fatalf("expected two audit entries, got %d", len(auditStore.entries))
+	}
+
+	firstEntry := auditStore.entries[0]
+	if firstEntry.App != "iTerm2" {
+		t.Fatalf("expected first audit entry for lenient app, got %q", firstEntry.App)
+	}
+	if firstEntry.Action != string(config.ActionAllow) {
+		t.Fatalf("expected lenient app to allow, got %q", firstEntry.Action)
+	}
+
+	secondEntry := auditStore.entries[1]
+	if secondEntry.App != "Slack" {
+		t.Fatalf("expected strict app audit attribution, got %q", secondEntry.App)
+	}
+	if secondEntry.Action != string(config.ActionBlock) {
+		t.Fatalf("expected strict app to block, got %q", secondEntry.Action)
+	}
+}
+
+func TestRunReevaluatesOnUnchangedClipboardWhenBundleIDChanges(t *testing.T) {
+	cfg := config.Defaults()
+
+	chromePolicy := copyPolicy(cfg.Global)
+	chromePolicy.Actions[core.RiskLevelHigh] = config.ActionAllow
+	cfg.PerApp["Google Chrome"] = chromePolicy
+
+	chromeBundlePolicy := copyPolicy(cfg.Global)
+	chromeBundlePolicy.Actions[core.RiskLevelHigh] = config.ActionWarn
+	cfg.PerAppBundleID["com.google.Chrome"] = chromeBundlePolicy
+
+	clip := &mockClipboard{
+		value: "prefix\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nsuffix",
+	}
+	notifier := &mockNotifier{}
+	currentApp := struct {
+		name     string
+		bundleID string
+	}{
+		name:     "Google Chrome",
+		bundleID: "com.brave.Browser",
+	}
+	foreground := &mockForegroundApp{
+		activeApp: func() (string, string, error) {
+			return currentApp.name, currentApp.bundleID, nil
+		},
+	}
+	auditStore := &mockAuditLogStore{}
+
+	svc := NewWithDependencies(cfg, clip, foreground, notifier)
+	svc.SetAuditLogStore(auditStore)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	readCount := 0
+	clip.readHook = func() {
+		readCount++
+		if readCount == 2 {
+			currentApp.bundleID = "com.google.Chrome"
+			cancel()
+			clip.readHook = nil
+		}
+	}
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if clip.writes != 0 {
+		t.Fatalf("expected warn action to avoid writes, got %d", clip.writes)
+	}
+	if notifier.calls != 1 {
+		t.Fatalf("expected one notification from bundle override, got %d", notifier.calls)
+	}
+	if len(auditStore.entries) != 2 {
+		t.Fatalf("expected two audit entries, got %d", len(auditStore.entries))
+	}
+
+	firstEntry := auditStore.entries[0]
+	if firstEntry.Action != string(config.ActionAllow) {
+		t.Fatalf("expected initial per-app policy to allow, got %q", firstEntry.Action)
+	}
+
+	secondEntry := auditStore.entries[1]
+	if secondEntry.App != "Google Chrome" {
+		t.Fatalf("expected bundle-override audit entry for Google Chrome, got %q", secondEntry.App)
+	}
+	if secondEntry.Action != string(config.ActionWarn) {
+		t.Fatalf("expected bundle-id override to warn, got %q", secondEntry.Action)
+	}
+}
+
+func TestRunAppSwitchWithoutActionableChangeDoesNotRewriteClipboard(t *testing.T) {
+	cfg := config.Defaults()
+
+	clip := &mockClipboard{
+		value: "prefix\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nsuffix",
+	}
+	notifier := &mockNotifier{}
+	currentApp := struct {
+		name     string
+		bundleID string
+	}{
+		name:     "Slack",
+		bundleID: "com.tinyspeck.slackmacgap",
+	}
+	foreground := &mockForegroundApp{
+		activeApp: func() (string, string, error) {
+			return currentApp.name, currentApp.bundleID, nil
+		},
+	}
+
+	svc := NewWithDependencies(cfg, clip, foreground, notifier)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	readCount := 0
+	clip.readHook = func() {
+		readCount++
+		if readCount == 2 {
+			currentApp.name = "Google Chrome"
+			currentApp.bundleID = "com.google.Chrome"
+			cancel()
+			clip.readHook = nil
+		}
+	}
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if clip.writes != 1 {
+		t.Fatalf("expected a single write from the original enforcement, got %d", clip.writes)
+	}
+	if clip.value != blockedClipboardValue {
+		t.Fatalf("expected clipboard to remain blocked, got %q", clip.value)
+	}
+	if notifier.calls != 1 {
+		t.Fatalf("expected no extra notification after app switch, got %d", notifier.calls)
 	}
 }
 

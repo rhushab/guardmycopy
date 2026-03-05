@@ -448,7 +448,7 @@ func runAllowOnceWithIO(args []string, stdout, stderr io.Writer, statePath strin
 		return 1
 	}
 
-	fmt.Fprintln(stdout, "next clipboard event will bypass enforcement once")
+	fmt.Fprintln(stdout, "next clipboard or foreground-app change will bypass enforcement once")
 	return 0
 }
 
@@ -566,12 +566,12 @@ func printUsage(w io.Writer) {
 Commands:
   sanitize    redact sensitive spans from stdin
   once        scan clipboard once and print the decision
-  run         run continuous clipboard scanning
+  run         run continuous clipboard and foreground-app scanning
   install     install and bootstrap the macOS launch agent
   uninstall   boot out and remove the macOS launch agent
   status      print launch agent and runtime bypass status
   snooze      disable enforcement for a duration (for example: 5m)
-  allow-once  bypass enforcement for the next clipboard event
+  allow-once  bypass enforcement for the next clipboard or foreground-app change
   log         print recent audit log entries or stats
   config      manage guardmycopy config files
   version     print CLI version

@@ -293,6 +293,67 @@ func TestApplyActionDebouncesNotificationsPerHash(t *testing.T) {
 	}
 }
 
+func TestApplyActionBlockNoopWhenClipboardAlreadyBlocked(t *testing.T) {
+	clip := &mockClipboard{value: blockedClipboardValue}
+	notifier := &mockNotifier{}
+	svc := NewWithDependencies(config.Defaults(), clip, nil, notifier)
+
+	decision := PolicyDecision{
+		ActiveAppName: "Slack",
+		Score:         15,
+		RiskLevel:     core.RiskLevelHigh,
+		Action:        config.ActionBlock,
+	}
+
+	changed, nextValue, err := svc.applyAction(decision, blockedClipboardValue, blockedClipboardValue, hashText("secret payload"))
+	if err != nil {
+		t.Fatalf("applyAction returned error: %v", err)
+	}
+	if changed {
+		t.Fatal("expected block action to no-op when clipboard is already blocked")
+	}
+	if nextValue != blockedClipboardValue {
+		t.Fatalf("expected blocked marker to remain unchanged, got %q", nextValue)
+	}
+	if clip.writes != 0 {
+		t.Fatalf("expected no clipboard writes, got %d", clip.writes)
+	}
+	if notifier.calls != 0 {
+		t.Fatalf("expected no notification for redundant block, got %d", notifier.calls)
+	}
+}
+
+func TestApplyActionSanitizeNoopWhenClipboardAlreadySanitized(t *testing.T) {
+	current := "prefix\n---******* ******* ********\n***\n******** ******* *****---\nsuffix"
+	clip := &mockClipboard{value: current}
+	notifier := &mockNotifier{}
+	svc := NewWithDependencies(config.Defaults(), clip, nil, notifier)
+
+	decision := PolicyDecision{
+		ActiveAppName: "Google Chrome",
+		Score:         8,
+		RiskLevel:     core.RiskLevelMed,
+		Action:        config.ActionSanitize,
+	}
+
+	changed, nextValue, err := svc.applyAction(decision, current, current, hashText("secret payload"))
+	if err != nil {
+		t.Fatalf("applyAction returned error: %v", err)
+	}
+	if changed {
+		t.Fatal("expected sanitize action to no-op when clipboard already matches sanitized value")
+	}
+	if nextValue != current {
+		t.Fatalf("expected sanitized clipboard to remain unchanged, got %q", nextValue)
+	}
+	if clip.writes != 0 {
+		t.Fatalf("expected no clipboard writes, got %d", clip.writes)
+	}
+	if notifier.calls != 0 {
+		t.Fatalf("expected no notification for redundant sanitize, got %d", notifier.calls)
+	}
+}
+
 func TestShouldNotifyEvictsExpiredHashes(t *testing.T) {
 	clip := &mockClipboard{}
 	svc := New(config.Defaults(), clip)
