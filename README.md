@@ -31,7 +31,7 @@ What it does not do:
 
 In scope:
 - Accidental paste of secrets copied in browsers, chat apps, terminals, editors
-- Immediate local policy enforcement on clipboard changes
+- Immediate local policy enforcement on clipboard or foreground-app changes
 
 Out of scope:
 - Malware with full local permissions
@@ -76,7 +76,7 @@ go build -o ./guardmycopy ./cmd/guardmycopy
 Notes:
 - Default poll interval: `500ms`
 - Minimum poll interval: `100ms` (lower values are clamped)
-- Adaptive idle backoff: after `4` consecutive unchanged polls, the run loop doubles the interval stepwise up to `2s` while idle, then resets immediately to the configured base interval on the next clipboard change
+- Adaptive idle backoff: after `4` consecutive polls with no clipboard or foreground-app change, the run loop doubles the interval stepwise up to `2s` while idle, then resets immediately to the configured base interval on the next clipboard or foreground-app change
 
 ### Manage macOS launch agent
 

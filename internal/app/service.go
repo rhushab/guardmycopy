@@ -34,6 +34,11 @@ type ScanDecision struct {
 	Allowlisted       bool
 }
 
+type activeAppContext struct {
+	name     string
+	bundleID string
+}
+
 type RuntimeStateStore interface {
 	Load() (userstate.State, error)
 	Save(userstate.State) error
@@ -115,8 +120,9 @@ func (s *Service) ScanCurrentDetailed() (ScanDecision, []string, error) {
 		return ScanDecision{}, nil, fmt.Errorf("read clipboard: %w", err)
 	}
 	currentHash := hashText(current)
+	appContext := s.currentActiveApp()
 
-	decision, result := s.decide(current)
+	decision, result := s.decideWithAppContext(current, appContext)
 	scanDecision := ScanDecision{
 		ActiveAppName:     decision.ActiveAppName,
 		ActiveAppBundleID: decision.ActiveAppBundleID,
@@ -149,8 +155,9 @@ func (s *Service) Sanitize(showDiff bool) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("read clipboard: %w", err)
 	}
+	appContext := s.currentActiveApp()
 
-	decision, result := s.decide(current)
+	decision, result := s.decideWithAppContext(current, appContext)
 
 	if showDiff {
 		safeBefore := s.redactForDisplay(current, result.Findings)
@@ -211,6 +218,7 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 	defer timer.Stop()
 
 	var lastSeenHash [32]byte
+	var lastSeenAppContext activeAppContext
 	seen := false
 	for {
 		select {
@@ -222,12 +230,14 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 				return fmt.Errorf("read clipboard: %w", err)
 			}
 			currentHash := hashText(current)
-			if seen && currentHash == lastSeenHash {
+			appContext := s.currentActiveApp()
+			if seen && currentHash == lastSeenHash && appContext == lastSeenAppContext {
 				timer.Reset(polling.OnClipboardUnchanged())
 				continue
 			}
 			seen = true
 			lastSeenHash = currentHash
+			lastSeenAppContext = appContext
 			nextInterval := polling.OnClipboardChanged()
 
 			bypass, bypassReason, err := s.shouldBypassEnforcement()
@@ -240,7 +250,7 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 				continue
 			}
 
-			decision, result := s.decide(current)
+			decision, result := s.decideWithAppContext(current, appContext)
 			s.logVerbose(
 				"app=%q bundle_id=%q action=%s risk=%s score=%d findings=%d",
 				decision.ActiveAppName,
@@ -278,18 +288,21 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 }
 
 func (s *Service) decide(text string) (PolicyDecision, policyResult) {
-	activeAppName, activeAppBundleID := s.resolveActiveApp()
-	result := s.analyze(text, activeAppName, activeAppBundleID)
+	return s.decideWithAppContext(text, s.currentActiveApp())
+}
+
+func (s *Service) decideWithAppContext(text string, appContext activeAppContext) (PolicyDecision, policyResult) {
+	result := s.analyze(text, appContext.name, appContext.bundleID)
 	if result.Allowlisted {
 		return PolicyDecision{
-			ActiveAppName:     activeAppName,
-			ActiveAppBundleID: activeAppBundleID,
+			ActiveAppName:     appContext.name,
+			ActiveAppBundleID: appContext.bundleID,
 			Score:             0,
 			RiskLevel:         core.RiskLevelLow,
 			Action:            config.ActionAllow,
 		}, result
 	}
-	decision := s.policyResolver.Resolve(activeAppName, activeAppBundleID, result.Score, result.RiskLevel)
+	decision := s.policyResolver.Resolve(appContext.name, appContext.bundleID, result.Score, result.RiskLevel)
 	return decision, result
 }
 
@@ -366,15 +379,15 @@ func scoreFindings(findings []core.Finding) int {
 	return score
 }
 
-func (s *Service) resolveActiveApp() (appName string, bundleID string) {
+func (s *Service) currentActiveApp() activeAppContext {
 	if s.foregroundApp == nil {
-		return "", ""
+		return activeAppContext{}
 	}
 	activeAppName, activeAppBundleID, err := s.foregroundApp.ActiveApp()
 	if err != nil {
-		return "", ""
+		return activeAppContext{}
 	}
-	return activeAppName, activeAppBundleID
+	return activeAppContext{name: activeAppName, bundleID: activeAppBundleID}
 }
 
 func (s *Service) applyAction(
@@ -390,19 +403,25 @@ func (s *Service) applyAction(
 		s.notifyAction(decision, clipboardHash)
 		return false, current, nil
 	case config.ActionBlock:
+		if current == blockedClipboardValue {
+			return false, current, nil
+		}
 		if err := s.clipboard.WriteText(blockedClipboardValue); err != nil {
 			return false, current, fmt.Errorf("write clipboard: %w", err)
 		}
 		s.notifyAction(decision, clipboardHash)
-		return blockedClipboardValue != current, blockedClipboardValue, nil
+		return true, blockedClipboardValue, nil
 	case config.ActionSanitize:
 		fallthrough
 	default:
+		if current == sanitized {
+			return false, current, nil
+		}
 		if err := s.clipboard.WriteText(sanitized); err != nil {
 			return false, current, fmt.Errorf("write clipboard: %w", err)
 		}
 		s.notifyAction(decision, clipboardHash)
-		return sanitized != current, sanitized, nil
+		return true, sanitized, nil
 	}
 }
 
