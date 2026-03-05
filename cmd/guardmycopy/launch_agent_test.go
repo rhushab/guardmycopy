@@ -21,13 +21,32 @@ func writeLaunchAgentTemplate(t *testing.T) string {
 		"<plist version=\"1.0\">",
 		"<dict>",
 		"<key>Program</key><string>__GUARDMYCOPY_BIN__</string>",
-		"<key>WorkingDirectory</key><string>__WORKDIR__</string>",
 		"<key>StandardOutPath</key><string>__LOG_DIR__/guardmycopy.out.log</string>",
 		"</dict>",
 		"</plist>",
 	}, "\n")
 	if err := os.WriteFile(templatePath, []byte(template), 0o644); err != nil {
 		t.Fatalf("write template: %v", err)
+	}
+	return templatePath
+}
+
+func writeLegacyLaunchAgentTemplate(t *testing.T) string {
+	t.Helper()
+
+	templatePath := filepath.Join(t.TempDir(), "guardmycopy-legacy.plist")
+	template := strings.Join([]string{
+		"<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+		"<plist version=\"1.0\">",
+		"<dict>",
+		"<key>Program</key><string>__GUARDMYCOPY_BIN__</string>",
+		"<key>WorkingDirectory</key><string>__WORKDIR__</string>",
+		"<key>StandardOutPath</key><string>__LOG_DIR__/guardmycopy.out.log</string>",
+		"</dict>",
+		"</plist>",
+	}, "\n")
+	if err := os.WriteFile(templatePath, []byte(template), 0o644); err != nil {
+		t.Fatalf("write legacy template: %v", err)
 	}
 	return templatePath
 }
@@ -60,9 +79,6 @@ func TestRunInstallWithIOWritesPlistAndBootstraps(t *testing.T) {
 		templatePath: templatePath,
 		executable: func() (string, error) {
 			return "/tmp/bin/guardmycopy", nil
-		},
-		cwd: func() (string, error) {
-			return "/tmp/workdir", nil
 		},
 		homeDir: func() (string, error) {
 			return home, nil
@@ -99,8 +115,8 @@ func TestRunInstallWithIOWritesPlistAndBootstraps(t *testing.T) {
 	if !strings.Contains(plist, "/tmp/bin/guardmycopy") {
 		t.Fatalf("expected binary path in plist, got %q", plist)
 	}
-	if !strings.Contains(plist, "/tmp/workdir") {
-		t.Fatalf("expected workdir in plist, got %q", plist)
+	if strings.Contains(plist, "WorkingDirectory") {
+		t.Fatalf("expected plist to omit working directory, got %q", plist)
 	}
 	logDir := filepath.Join(home, "Library", "Logs", "guardmycopy")
 	if _, err := os.Stat(logDir); err != nil {
@@ -123,16 +139,12 @@ func TestRunInstallWithIOWritesPlistAndBootstraps(t *testing.T) {
 
 func TestRunInstallWithIOUsesEmbeddedTemplateWhenTemplatePathUnset(t *testing.T) {
 	home := t.TempDir()
-	workDir := t.TempDir()
 
 	var launchctlCalls [][]string
 	deps := launchAgentDeps{
 		runtimeOS: "darwin",
 		executable: func() (string, error) {
 			return "/tmp/bin/guardmycopy", nil
-		},
-		cwd: func() (string, error) {
-			return workDir, nil
 		},
 		homeDir: func() (string, error) {
 			return home, nil
@@ -172,26 +184,23 @@ func TestRunInstallWithIOUsesEmbeddedTemplateWhenTemplatePathUnset(t *testing.T)
 	if !strings.Contains(plist, "/tmp/bin/guardmycopy") {
 		t.Fatalf("expected binary path in plist, got %q", plist)
 	}
-	if !strings.Contains(plist, workDir) {
-		t.Fatalf("expected workdir in plist, got %q", plist)
+	if strings.Contains(plist, "WorkingDirectory") {
+		t.Fatalf("expected embedded template to omit working directory, got %q", plist)
 	}
 	if len(launchctlCalls) != 2 {
 		t.Fatalf("expected two launchctl calls, got %d", len(launchctlCalls))
 	}
 }
 
-func TestRunInstallWithIOEscapesXMLSpecialCharacters(t *testing.T) {
-	home := t.TempDir()
-	templatePath := writeLaunchAgentTemplate(t)
+func TestRunInstallWithIOLegacyWorkingDirectoryPlaceholderUsesHomeDir(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "stable&home<dir>")
+	templatePath := writeLegacyLaunchAgentTemplate(t)
 
 	deps := launchAgentDeps{
 		runtimeOS:    "darwin",
 		templatePath: templatePath,
 		executable: func() (string, error) {
 			return "/tmp/bin/guard&my<copy>", nil
-		},
-		cwd: func() (string, error) {
-			return "/tmp/work&dir<prod>", nil
 		},
 		homeDir: func() (string, error) {
 			return home, nil
@@ -223,8 +232,14 @@ func TestRunInstallWithIOEscapesXMLSpecialCharacters(t *testing.T) {
 	if !strings.Contains(plist, "/tmp/bin/guard&amp;my&lt;copy&gt;") {
 		t.Fatalf("expected XML-escaped binary path in plist, got %q", plist)
 	}
-	if !strings.Contains(plist, "/tmp/work&amp;dir&lt;prod&gt;") {
-		t.Fatalf("expected XML-escaped workdir in plist, got %q", plist)
+	if !strings.Contains(plist, "WorkingDirectory") {
+		t.Fatalf("expected legacy template working directory to be preserved, got %q", plist)
+	}
+	if !strings.Contains(plist, "stable&amp;home&lt;dir&gt;") {
+		t.Fatalf("expected legacy workdir placeholder to use XML-escaped home dir, got %q", plist)
+	}
+	if strings.Contains(plist, "work&amp;dir") {
+		t.Fatalf("expected install to avoid caller cwd, got %q", plist)
 	}
 }
 
@@ -245,9 +260,6 @@ func TestRunInstallWithIOReinstallsLoadedService(t *testing.T) {
 		templatePath: templatePath,
 		executable: func() (string, error) {
 			return "/tmp/bin/guardmycopy-new", nil
-		},
-		cwd: func() (string, error) {
-			return "/tmp/workdir-new", nil
 		},
 		homeDir: func() (string, error) {
 			return home, nil
@@ -278,8 +290,8 @@ func TestRunInstallWithIOReinstallsLoadedService(t *testing.T) {
 	if !strings.Contains(plist, "/tmp/bin/guardmycopy-new") {
 		t.Fatalf("expected updated binary path in plist, got %q", plist)
 	}
-	if !strings.Contains(plist, "/tmp/workdir-new") {
-		t.Fatalf("expected updated workdir in plist, got %q", plist)
+	if strings.Contains(plist, "WorkingDirectory") {
+		t.Fatalf("expected reinstalled plist to omit working directory, got %q", plist)
 	}
 	if len(launchctlCalls) != 2 {
 		t.Fatalf("expected two launchctl calls, got %d", len(launchctlCalls))
@@ -314,9 +326,6 @@ func TestRunInstallWithIORollsBackPlistWhenReloadFails(t *testing.T) {
 		templatePath: templatePath,
 		executable: func() (string, error) {
 			return "/tmp/bin/guardmycopy-new", nil
-		},
-		cwd: func() (string, error) {
-			return "/tmp/workdir-new", nil
 		},
 		homeDir: func() (string, error) {
 			return home, nil
@@ -426,21 +435,25 @@ func TestRunUninstallWithIORunsBootoutAndRemovesPlist(t *testing.T) {
 	if len(launchctlCalls) != 1 {
 		t.Fatalf("expected one launchctl call, got %d", len(launchctlCalls))
 	}
-	expected := []string{"bootout", "gui/777", plistPath}
+	expected := []string{"bootout", launchAgentTarget(777)}
 	if got := strings.Join(launchctlCalls[0], " "); strings.Join(expected, " ") != got {
 		t.Fatalf("unexpected launchctl args: got %q want %q", got, strings.Join(expected, " "))
 	}
 }
 
-func TestRunUninstallWithIOMissingPlistSkipsBootout(t *testing.T) {
+func TestRunUninstallWithIOMissingPlistStillBootsOutService(t *testing.T) {
 	home := t.TempDir()
+	var launchctlCalls [][]string
 	deps := launchAgentDeps{
 		runtimeOS: "darwin",
 		homeDir: func() (string, error) {
 			return home, nil
 		},
+		uid: func() int {
+			return 777
+		},
 		runLaunchctl: func(args ...string) (string, error) {
-			t.Fatal("launchctl should not be called when plist is missing")
+			launchctlCalls = append(launchctlCalls, append([]string(nil), args...))
 			return "", nil
 		},
 	}
@@ -450,6 +463,13 @@ func TestRunUninstallWithIOMissingPlistSkipsBootout(t *testing.T) {
 	code := runUninstallWithIO(nil, &stdout, &stderr, deps)
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
+	}
+	if len(launchctlCalls) != 1 {
+		t.Fatalf("expected one launchctl call, got %d", len(launchctlCalls))
+	}
+	expected := []string{"bootout", launchAgentTarget(777)}
+	if got := strings.Join(launchctlCalls[0], " "); strings.Join(expected, " ") != got {
+		t.Fatalf("unexpected launchctl args: got %q want %q", got, strings.Join(expected, " "))
 	}
 	if !strings.Contains(stdout.String(), "not found") {
 		t.Fatalf("expected not found message, got %q", stdout.String())
