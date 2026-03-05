@@ -299,6 +299,9 @@ func TestRunStatusWithIOReportsLoadedRunningAndBypass(t *testing.T) {
 	var launchctlCalls [][]string
 	deps := launchAgentDeps{
 		runtimeOS: "darwin",
+		timeNow: func() time.Time {
+			return snoozedUntil.Add(-time.Minute)
+		},
 		uid: func() int {
 			return 501
 		},
@@ -340,6 +343,47 @@ func TestRunStatusWithIOReportsLoadedRunningAndBypass(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `foreground-app-bundle-id="com.google.Chrome"`) {
 		t.Fatalf("expected foreground bundle id, got %q", stdout.String())
+	}
+}
+
+func TestRunStatusWithIOIgnoresExpiredSnooze(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	store, err := userstate.New(statePath)
+	if err != nil {
+		t.Fatalf("new userstate store: %v", err)
+	}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	if err := store.Save(userstate.State{
+		SnoozedUntil: now.Add(-time.Minute),
+		AllowOnce:    true,
+	}); err != nil {
+		t.Fatalf("save userstate: %v", err)
+	}
+
+	deps := launchAgentDeps{
+		runtimeOS: "darwin",
+		timeNow: func() time.Time {
+			return now
+		},
+		runLaunchctl: func(args ...string) (string, error) {
+			return "state = running\npid = 123", nil
+		},
+		activeApp: func() (string, string, error) {
+			return "Google Chrome", "com.google.Chrome", nil
+		},
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runStatusWithIO(nil, &stdout, &stderr, deps, statePath)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "snoozed-until=none") {
+		t.Fatalf("expected expired snooze to report as none, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "allow-once=true") {
+		t.Fatalf("expected allow-once=true to remain visible, got %q", stdout.String())
 	}
 }
 

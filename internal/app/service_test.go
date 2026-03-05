@@ -529,6 +529,65 @@ func TestRunRespectsAllowOnceState(t *testing.T) {
 	}
 }
 
+func TestRunReenforcesWhenSnoozeExpiresWithoutClipboardOrAppChange(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	snoozedUntil := now.Add(time.Minute)
+
+	clip := &mockClipboardWithChangeDetector{
+		mockClipboard: &mockClipboard{
+			value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend",
+		},
+		changeCounts: []int64{7, 7, 8},
+	}
+	notifier := &mockNotifier{}
+	foreground := &mockForegroundApp{name: "Slack", bundleID: "com.tinyspeck.slackmacgap"}
+	stateStore := &mockRuntimeStateStore{
+		state: userstate.State{
+			SnoozedUntil: snoozedUntil,
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	clip.changeCountHook = func(call int) {
+		switch call {
+		case 2:
+			now = snoozedUntil.Add(time.Millisecond)
+		case 3:
+			cancel()
+			clip.changeCountHook = nil
+		}
+	}
+
+	svc := NewWithDependencies(config.Defaults(), clip, foreground, notifier)
+	svc.timeNow = func() time.Time { return now }
+	svc.SetRuntimeStateStore(stateStore)
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if clip.reads != 2 {
+		t.Fatalf("expected two clipboard reads across snooze expiry, got %d", clip.reads)
+	}
+	if clip.writes != 1 {
+		t.Fatalf("expected one clipboard write after snooze expiry, got %d", clip.writes)
+	}
+	if clip.value != blockedClipboardValue {
+		t.Fatalf("expected clipboard to be blocked after snooze expiry, got %q", clip.value)
+	}
+	if notifier.calls != 1 {
+		t.Fatalf("expected one notification after snooze expiry, got %d", notifier.calls)
+	}
+	if stateStore.saveCalls != 1 {
+		t.Fatalf("expected expired snooze to be persisted once, got %d saves", stateStore.saveCalls)
+	}
+	if !stateStore.state.SnoozedUntil.IsZero() {
+		t.Fatalf("expected snooze to be cleared after expiry, got %s", stateStore.state.SnoozedUntil)
+	}
+}
+
 func TestScanCurrentDetailedWritesAuditEntry(t *testing.T) {
 	clip := &mockClipboard{value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"}
 	svc := New(config.Defaults(), clip)

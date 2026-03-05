@@ -30,6 +30,7 @@ type launchAgentDeps struct {
 	runtimeOS    string
 	templatePath string
 	templateData []byte
+	timeNow      func() time.Time
 	executable   func() (string, error)
 	cwd          func() (string, error)
 	homeDir      func() (string, error)
@@ -53,6 +54,9 @@ func (d launchAgentDeps) withDefaults() launchAgentDeps {
 	}
 	if len(d.templateData) == 0 {
 		d.templateData = embeddedLaunchAgentTemplate
+	}
+	if d.timeNow == nil {
+		d.timeNow = time.Now
 	}
 	if d.executable == nil {
 		d.executable = os.Executable
@@ -216,10 +220,7 @@ func runStatusWithIO(args []string, stdout, stderr io.Writer, deps launchAgentDe
 		return 1
 	}
 
-	snoozedUntil := "none"
-	if !state.SnoozedUntil.IsZero() {
-		snoozedUntil = state.SnoozedUntil.Format(time.RFC3339)
-	}
+	snoozedUntil := formatActiveSnoozedUntil(state, deps.timeNow())
 
 	fmt.Fprintf(stdout, "launch-agent-loaded=%t\n", loaded)
 	fmt.Fprintf(stdout, "launch-agent-running=%t\n", running)
@@ -238,6 +239,14 @@ func runStatusWithIO(args []string, stdout, stderr io.Writer, deps launchAgentDe
 		fmt.Fprintf(stdout, "foreground-app-error=%q\n", appErr.Error())
 	}
 	return 0
+}
+
+func formatActiveSnoozedUntil(state userstate.State, now time.Time) string {
+	snoozedUntil, ok := state.ActiveSnoozedUntil(now)
+	if !ok {
+		return "none"
+	}
+	return snoozedUntil.Format(time.RFC3339)
 }
 
 func installLaunchAgent(stdout io.Writer, deps launchAgentDeps) error {
