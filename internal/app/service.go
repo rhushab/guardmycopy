@@ -779,12 +779,15 @@ func (s *Service) persistEnforcementHealth() {
 	}
 	state, err := s.stateStore.Load()
 	if err != nil {
+		s.logVerbose("enforcement health persist skipped: load failed: %v", err)
 		return
 	}
 	state.LastEnforcementError = s.lastEnforcementError
 	state.LastEnforcementErrorAt = s.lastEnforcementErrorAt
 	state.ConsecutiveErrors = s.consecutiveErrors
-	_ = s.stateStore.Save(state)
+	if err := s.stateStore.Save(state); err != nil {
+		s.logVerbose("enforcement health persist failed: %v", err)
+	}
 }
 
 func (s *Service) logVerbose(format string, args ...any) {
