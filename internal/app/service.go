@@ -285,6 +285,7 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 			clipboardOrAppChanged := !seen ||
 				currentHash != lastSeenHash ||
 				appResolution.context != lastSeenAppContext
+			allowOnceEligible := seen && clipboardOrAppChanged
 			if !clipboardOrAppChanged && snoozeActive == lastSeenSnoozeActive {
 				if hasChangeCount {
 					lastSeenChangeCount = currentChangeCount
@@ -306,7 +307,7 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 			}
 			nextInterval := polling.OnClipboardChanged()
 
-			bypass, bypassReason := s.shouldBypassEnforcementForRun(state, clipboardOrAppChanged)
+			bypass, bypassReason := s.shouldBypassEnforcementForRun(state, allowOnceEligible)
 			if bypass {
 				s.logVerbose("action=allow reason=%s", bypassReason)
 				timer.Reset(nextInterval)
