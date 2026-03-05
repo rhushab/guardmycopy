@@ -306,6 +306,9 @@ func TestRunStatusWithIOReportsLoadedRunningAndBypass(t *testing.T) {
 			launchctlCalls = append(launchctlCalls, append([]string(nil), args...))
 			return "state = running\npid = 123", nil
 		},
+		activeApp: func() (string, string, error) {
+			return "Google Chrome", "com.google.Chrome", nil
+		},
 	}
 
 	var stdout bytes.Buffer
@@ -329,6 +332,15 @@ func TestRunStatusWithIOReportsLoadedRunningAndBypass(t *testing.T) {
 	if !strings.Contains(stdout.String(), "allow-once=true") {
 		t.Fatalf("expected allow-once=true, got %q", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "foreground-app-context=resolved") {
+		t.Fatalf("expected resolved foreground app context, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `foreground-app="Google Chrome"`) {
+		t.Fatalf("expected foreground app name, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `foreground-app-bundle-id="com.google.Chrome"`) {
+		t.Fatalf("expected foreground bundle id, got %q", stdout.String())
+	}
 }
 
 func TestRunStatusWithIOMissingService(t *testing.T) {
@@ -337,6 +349,9 @@ func TestRunStatusWithIOMissingService(t *testing.T) {
 		runtimeOS: "darwin",
 		runLaunchctl: func(args ...string) (string, error) {
 			return "Could not find service \"com.guardmycopy.agent\" in domain", errors.New("exit status 113")
+		},
+		activeApp: func() (string, string, error) {
+			return "", "", nil
 		},
 	}
 
@@ -357,6 +372,35 @@ func TestRunStatusWithIOMissingService(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "allow-once=false") {
 		t.Fatalf("expected allow-once=false, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "foreground-app-context=unavailable") {
+		t.Fatalf("expected unavailable foreground app context, got %q", stdout.String())
+	}
+}
+
+func TestRunStatusWithIOReportsForegroundAppFailure(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	deps := launchAgentDeps{
+		runtimeOS: "darwin",
+		runLaunchctl: func(args ...string) (string, error) {
+			return "state = running\npid = 123", nil
+		},
+		activeApp: func() (string, string, error) {
+			return "", "", errors.New("osascript active app failed: accessibility denied")
+		},
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runStatusWithIO(nil, &stdout, &stderr, deps, statePath)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "foreground-app-context=resolution_failed") {
+		t.Fatalf("expected failed foreground app context, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `foreground-app-error="osascript active app failed: accessibility denied"`) {
+		t.Fatalf("expected foreground app error, got %q", stdout.String())
 	}
 }
 

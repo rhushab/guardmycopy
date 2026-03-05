@@ -1,10 +1,12 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -578,5 +580,98 @@ func TestScanCurrentDetailedIgnoresAuditWriteErrors(t *testing.T) {
 
 	if _, _, err := svc.ScanCurrentDetailed(); err != nil {
 		t.Fatalf("ScanCurrentDetailed should ignore audit log errors, got %v", err)
+	}
+}
+
+func TestScanCurrentDetailedReportsForegroundAppFailureFallback(t *testing.T) {
+	cfg := config.Defaults()
+	slackPolicy := clonePolicy(cfg.Global)
+	slackPolicy.Actions[core.RiskLevelHigh] = config.ActionAllow
+	cfg.PerApp["Slack"] = slackPolicy
+
+	clip := &mockClipboard{value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"}
+	foreground := &mockForegroundApp{err: errors.New("osascript active app failed: accessibility denied")}
+	svc := NewWithDependencies(cfg, clip, foreground, nil)
+
+	decision, reasoning, err := svc.ScanCurrentDetailed()
+	if err != nil {
+		t.Fatalf("ScanCurrentDetailed returned error: %v", err)
+	}
+	if decision.Action != config.ActionBlock {
+		t.Fatalf("expected global block fallback, got %s", decision.Action)
+	}
+	if decision.PolicySource != PolicySourceGlobalFallbackAppDetectionFailed {
+		t.Fatalf("unexpected policy source: %q", decision.PolicySource)
+	}
+	if decision.AppContextStatus != AppContextStatusResolutionFailed {
+		t.Fatalf("unexpected app context status: %q", decision.AppContextStatus)
+	}
+
+	joined := strings.Join(reasoning, "\n")
+	if !strings.Contains(joined, "foreground app detection failed: osascript active app failed: accessibility denied") {
+		t.Fatalf("expected failure reasoning, got %q", joined)
+	}
+	if !strings.Contains(joined, "global policy was used because app context could not be resolved; per-app overrides were skipped") {
+		t.Fatalf("expected explicit global fallback reasoning, got %q", joined)
+	}
+}
+
+func TestScanCurrentDetailedDebouncesForegroundAppWarnings(t *testing.T) {
+	clip := &mockClipboard{value: "hello"}
+	foreground := &mockForegroundApp{err: errors.New("osascript active app failed: accessibility denied")}
+	svc := NewWithDependencies(config.Defaults(), clip, foreground, nil)
+
+	var warnings bytes.Buffer
+	svc.SetWarningOutput(&warnings)
+
+	now := time.Unix(1_700_000_000, 0).UTC()
+	svc.timeNow = func() time.Time { return now }
+
+	if _, _, err := svc.ScanCurrentDetailed(); err != nil {
+		t.Fatalf("first ScanCurrentDetailed returned error: %v", err)
+	}
+	if _, _, err := svc.ScanCurrentDetailed(); err != nil {
+		t.Fatalf("second ScanCurrentDetailed returned error: %v", err)
+	}
+	if got := strings.Count(warnings.String(), "warning: foreground app detection failed"); got != 1 {
+		t.Fatalf("expected 1 debounced warning, got %d (%q)", got, warnings.String())
+	}
+
+	now = now.Add(svc.warningDebounce + time.Millisecond)
+	if _, _, err := svc.ScanCurrentDetailed(); err != nil {
+		t.Fatalf("third ScanCurrentDetailed returned error: %v", err)
+	}
+	if got := strings.Count(warnings.String(), "warning: foreground app detection failed"); got != 2 {
+		t.Fatalf("expected warning after debounce window, got %d (%q)", got, warnings.String())
+	}
+}
+
+func TestScanCurrentDetailedWritesAuditAppContextMetadataOnFailure(t *testing.T) {
+	clip := &mockClipboard{value: "start\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nend"}
+	foreground := &mockForegroundApp{err: errors.New("osascript active app failed: accessibility denied")}
+	svc := NewWithDependencies(config.Defaults(), clip, foreground, nil)
+
+	auditStore := &mockAuditLogStore{}
+	svc.SetAuditLogStore(auditStore)
+
+	if _, _, err := svc.ScanCurrentDetailed(); err != nil {
+		t.Fatalf("ScanCurrentDetailed returned error: %v", err)
+	}
+	if len(auditStore.entries) != 1 {
+		t.Fatalf("expected 1 audit entry, got %d", len(auditStore.entries))
+	}
+
+	metadata := auditStore.entries[0].AppContext
+	if metadata == nil {
+		t.Fatal("expected app context metadata on failure")
+	}
+	if metadata.Status != string(AppContextStatusResolutionFailed) {
+		t.Fatalf("unexpected app context status: %q", metadata.Status)
+	}
+	if metadata.PolicySource != string(PolicySourceGlobalFallbackAppDetectionFailed) {
+		t.Fatalf("unexpected app context policy source: %q", metadata.PolicySource)
+	}
+	if !strings.Contains(metadata.Error, "osascript active app failed: accessibility denied") {
+		t.Fatalf("unexpected app context error: %q", metadata.Error)
 	}
 }

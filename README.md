@@ -46,6 +46,8 @@ Out of scope:
 - Uses `osascript` + `System Events` for foreground app name, bundle ID, and notifications
 - You may need Accessibility permission for your terminal/app:
   - `System Settings -> Privacy & Security -> Accessibility`
+- If foreground-app detection is unavailable or fails, `guardmycopy` keeps enforcing the **global** policy only.
+- In that degraded state, `per_app` and `per_app_bundle_id` overrides are skipped until app context starts resolving again.
 
 ## Quickstart
 
@@ -92,6 +94,8 @@ Check launch agent + runtime bypass state:
 ```bash
 ./guardmycopy status
 ```
+
+`status` also reports foreground-app detection health, the currently resolved app/bundle ID when available, and the current detection error when resolution is failing.
 
 Uninstall launch agent:
 
@@ -218,7 +222,11 @@ Expected audit location:
 ## Troubleshooting
 
 - `unsupported OS`: guardmycopy runs only on macOS.
-- `osascript active app failed`: grant Accessibility permission to your terminal/app.
+- `osascript active app failed` or `foreground-app-context=resolution_failed`:
+  - Open `System Settings -> Privacy & Security -> Accessibility`.
+  - Enable the app that launches `guardmycopy` (for example `Terminal`, `iTerm2`, or your launch-agent host if that is how you run it).
+  - Fully quit and relaunch that app, then rerun `./guardmycopy status` or `./guardmycopy once --verbose`.
+  - While this is failing, `guardmycopy` still enforces the **global** policy, but `per_app` and `per_app_bundle_id` overrides are not applied.
 - `load config`: invalid YAML or invalid policy keys; fix config and rerun.
 - Polling too aggressive warning: raise `poll_interval_ms` to `>=100`.
 - Unexpected detections: tune `detector_toggles`, `thresholds`, and `allowlist_patterns`.
