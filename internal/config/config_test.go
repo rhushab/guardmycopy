@@ -313,6 +313,22 @@ func TestWriteDefaultCreatesConfigFile(t *testing.T) {
 		t.Fatal("written config did not match default template")
 	}
 
+	dirInfo, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("stat config directory: %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got&0o077 != 0 {
+		t.Fatalf("expected private config directory permissions, got %o", got)
+	}
+
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat config file: %v", err)
+	}
+	if got := fileInfo.Mode().Perm(); got&0o077 != 0 {
+		t.Fatalf("expected private config file permissions, got %o", got)
+	}
+
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)

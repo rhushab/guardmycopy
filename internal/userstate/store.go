@@ -13,6 +13,8 @@ import (
 const (
 	defaultStateDirName  = "guardmycopy"
 	defaultStateFileName = "state.json"
+	defaultStateDirMode  = 0o700
+	defaultStateFileMode = 0o600
 )
 
 type State struct {
@@ -71,7 +73,7 @@ func (s *Store) Load() (State, error) {
 }
 
 func (s *Store) Save(state State) error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(s.path), defaultStateDirMode); err != nil {
 		return fmt.Errorf("create state directory: %w", err)
 	}
 
@@ -81,7 +83,7 @@ func (s *Store) Save(state State) error {
 	}
 	payload = append(payload, '\n')
 
-	if err := os.WriteFile(s.path, payload, 0o644); err != nil {
+	if err := os.WriteFile(s.path, payload, defaultStateFileMode); err != nil {
 		return fmt.Errorf("write state file: %w", err)
 	}
 

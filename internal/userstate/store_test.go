@@ -1,6 +1,7 @@
 package userstate
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -50,5 +51,33 @@ func TestStoreSaveAndLoadRoundTrip(t *testing.T) {
 	}
 	if got.AllowOnce != want.AllowOnce {
 		t.Fatalf("unexpected allow_once: got %t want %t", got.AllowOnce, want.AllowOnce)
+	}
+}
+
+func TestStoreSaveUsesPrivatePermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "state.json")
+	store, err := New(path)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	if err := store.Save(State{AllowOnce: true}); err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+
+	dirInfo, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("stat state directory: %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got&0o077 != 0 {
+		t.Fatalf("expected private state directory permissions, got %o", got)
+	}
+
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat state file: %v", err)
+	}
+	if got := fileInfo.Mode().Perm(); got&0o077 != 0 {
+		t.Fatalf("expected private state file permissions, got %o", got)
 	}
 }

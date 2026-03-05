@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - Added explicit macOS-only guardrails for launch-agent lifecycle commands with clear errors on other operating systems
 - Service run loop now uses adaptive idle polling backoff: unchanged clipboard reads gradually increase poll interval (capped at 2s) and reset immediately to the configured base interval when clipboard content changes
+- CLI version now reports `1.0.0-rc2-dev` while unreleased changes are in progress
 
 ## [1.0.0-rc1] - 2026-03-04
 

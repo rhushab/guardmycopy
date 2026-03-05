@@ -293,6 +293,47 @@ func TestApplyActionDebouncesNotificationsPerHash(t *testing.T) {
 	}
 }
 
+func TestShouldNotifyEvictsExpiredHashes(t *testing.T) {
+	clip := &mockClipboard{}
+	svc := New(config.Defaults(), clip)
+
+	now := time.Unix(100, 0)
+	svc.timeNow = func() time.Time { return now }
+
+	firstHash := hashText("first secret")
+	secondHash := hashText("second secret")
+	thirdHash := hashText("third secret")
+
+	if !svc.shouldNotify(firstHash) {
+		t.Fatal("expected first hash to notify")
+	}
+
+	now = now.Add(500 * time.Millisecond)
+	if !svc.shouldNotify(secondHash) {
+		t.Fatal("expected second hash to notify")
+	}
+	if len(svc.lastAlertByHash) != 2 {
+		t.Fatalf("expected 2 cached hashes, got %d", len(svc.lastAlertByHash))
+	}
+
+	now = now.Add(600 * time.Millisecond)
+	if !svc.shouldNotify(thirdHash) {
+		t.Fatal("expected third hash to notify")
+	}
+	if len(svc.lastAlertByHash) != 2 {
+		t.Fatalf("expected cache to evict expired entries, got %d", len(svc.lastAlertByHash))
+	}
+	if _, ok := svc.lastAlertByHash[firstHash]; ok {
+		t.Fatal("expected first hash entry to be evicted")
+	}
+	if _, ok := svc.lastAlertByHash[secondHash]; !ok {
+		t.Fatal("expected second hash entry to remain")
+	}
+	if _, ok := svc.lastAlertByHash[thirdHash]; !ok {
+		t.Fatal("expected third hash entry to be present")
+	}
+}
+
 func TestRunStopsWhenContextCanceled(t *testing.T) {
 	clip := &mockClipboard{value: "hello"}
 	svc := New(config.Defaults(), clip)

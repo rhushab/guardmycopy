@@ -2,6 +2,7 @@ package auditlog
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -121,5 +122,40 @@ func TestStoreLogSchemaDoesNotIncludeRawClipboardContent(t *testing.T) {
 		if _, ok := payload[disallowed]; ok {
 			t.Fatalf("unexpected raw clipboard field %q in audit payload", disallowed)
 		}
+	}
+}
+
+func TestStoreLogUsesPrivatePermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "audit.jsonl")
+	store, err := New(path)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	if err := store.Log(Entry{
+		App:          "Terminal",
+		Score:        1,
+		RiskLevel:    "low",
+		FindingTypes: []string{"jwt"},
+		Action:       "allow",
+		ContentHash:  "hash",
+	}); err != nil {
+		t.Fatalf("Log returned error: %v", err)
+	}
+
+	dirInfo, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("stat audit directory: %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got&0o077 != 0 {
+		t.Fatalf("expected private audit directory permissions, got %o", got)
+	}
+
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat audit file: %v", err)
+	}
+	if got := fileInfo.Mode().Perm(); got&0o077 != 0 {
+		t.Fatalf("expected private audit file permissions, got %o", got)
 	}
 }

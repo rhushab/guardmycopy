@@ -1,8 +1,13 @@
 APP := guardmycopy
 CMD := ./cmd/guardmycopy
 GO ?= go
+GO_BIN := $(shell $(GO) env GOPATH)/bin
+STATICCHECK_VERSION ?= latest
+GOVULNCHECK_VERSION ?= latest
+STATICCHECK := $(GO_BIN)/staticcheck
+GOVULNCHECK := $(GO_BIN)/govulncheck
 
-.PHONY: fmt fmt-check vet lint test build run ci
+.PHONY: fmt fmt-check vet tools lint vuln test build run ci
 
 fmt:
 	$(GO) fmt ./...
@@ -18,12 +23,19 @@ fmt-check:
 vet:
 	$(GO) vet ./...
 
-lint:
-	@if command -v staticcheck >/dev/null 2>&1; then \
-		staticcheck ./...; \
-	else \
-		echo "staticcheck not found; skipping optional lint step"; \
-	fi
+tools: $(STATICCHECK) $(GOVULNCHECK)
+
+$(STATICCHECK):
+	$(GO) install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
+
+$(GOVULNCHECK):
+	$(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+
+lint: $(STATICCHECK)
+	$(STATICCHECK) ./...
+
+vuln: $(GOVULNCHECK)
+	$(GOVULNCHECK) ./...
 
 test:
 	$(GO) test ./...
@@ -34,4 +46,4 @@ build:
 run:
 	$(GO) run $(CMD) run
 
-ci: fmt-check test vet lint build
+ci: fmt-check test vet lint vuln build

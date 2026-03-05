@@ -440,12 +440,21 @@ func (s *Service) shouldNotify(clipboardHash [32]byte) bool {
 	}
 
 	now := s.timeNow()
+	s.evictExpiredAlerts(now)
 	last, ok := s.lastAlertByHash[clipboardHash]
 	if ok && now.Sub(last) < s.alertDebounce {
 		return false
 	}
 	s.lastAlertByHash[clipboardHash] = now
 	return true
+}
+
+func (s *Service) evictExpiredAlerts(now time.Time) {
+	for hash, last := range s.lastAlertByHash {
+		if now.Sub(last) >= s.alertDebounce {
+			delete(s.lastAlertByHash, hash)
+		}
+	}
 }
 
 func notificationForAction(decision PolicyDecision, appLabel string) (title, message string) {

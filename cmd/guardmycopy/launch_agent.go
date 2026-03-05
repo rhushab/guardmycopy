@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/xml"
 	"errors"
 	"flag"
 	"fmt"
@@ -239,6 +240,18 @@ func installLaunchAgent(stdout io.Writer, deps launchAgentDeps) error {
 	if err != nil {
 		return fmt.Errorf("make working directory absolute: %w", err)
 	}
+	xmlBinPath, err := escapeXMLText(binPath)
+	if err != nil {
+		return fmt.Errorf("escape executable path for plist: %w", err)
+	}
+	xmlWorkDir, err := escapeXMLText(workDir)
+	if err != nil {
+		return fmt.Errorf("escape working directory for plist: %w", err)
+	}
+	xmlLogDir, err := escapeXMLText(logDir)
+	if err != nil {
+		return fmt.Errorf("escape log directory for plist: %w", err)
+	}
 
 	if err := deps.mkdirAll(filepath.Dir(plistPath), 0o755); err != nil {
 		return fmt.Errorf("create launch agents directory: %w", err)
@@ -248,9 +261,9 @@ func installLaunchAgent(stdout io.Writer, deps launchAgentDeps) error {
 	}
 
 	rendered := strings.NewReplacer(
-		"__GUARDMYCOPY_BIN__", binPath,
-		"__WORKDIR__", workDir,
-		"__LOG_DIR__", logDir,
+		"__GUARDMYCOPY_BIN__", xmlBinPath,
+		"__WORKDIR__", xmlWorkDir,
+		"__LOG_DIR__", xmlLogDir,
 	).Replace(string(templateBytes))
 
 	if unresolved := unresolvedTemplatePlaceholders(rendered); len(unresolved) > 0 {
@@ -324,10 +337,24 @@ func launchAgentRunning(output string) bool {
 	for _, line := range strings.Split(output, "\n") {
 		trimmed := strings.TrimSpace(strings.ToLower(line))
 		if strings.HasPrefix(trimmed, "state =") {
-			return strings.Contains(trimmed, "running")
+			state := strings.TrimSpace(strings.TrimPrefix(trimmed, "state ="))
+			state = strings.Trim(state, "\"")
+			stateFields := strings.Fields(state)
+			if len(stateFields) == 0 {
+				return false
+			}
+			return stateFields[0] == "running"
 		}
 	}
 	return false
+}
+
+func escapeXMLText(value string) (string, error) {
+	var builder strings.Builder
+	if err := xml.EscapeText(&builder, []byte(value)); err != nil {
+		return "", err
+	}
+	return builder.String(), nil
 }
 
 func unresolvedTemplatePlaceholders(value string) []string {

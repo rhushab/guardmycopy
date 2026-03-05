@@ -14,6 +14,8 @@ import (
 const (
 	defaultAuditDirName  = "guardmycopy"
 	defaultAuditFileName = "audit.jsonl"
+	defaultAuditDirMode  = 0o700
+	defaultAuditFileMode = 0o600
 )
 
 type Entry struct {
@@ -66,7 +68,7 @@ func (s *Store) Log(entry Entry) error {
 		entry.Timestamp = entry.Timestamp.UTC()
 	}
 
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(s.path), defaultAuditDirMode); err != nil {
 		return fmt.Errorf("create audit log directory: %w", err)
 	}
 
@@ -76,7 +78,7 @@ func (s *Store) Log(entry Entry) error {
 	}
 	payload = append(payload, '\n')
 
-	file, err := os.OpenFile(s.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	file, err := os.OpenFile(s.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, defaultAuditFileMode)
 	if err != nil {
 		return fmt.Errorf("open audit log: %w", err)
 	}

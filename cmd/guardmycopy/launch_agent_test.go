@@ -87,6 +87,64 @@ func TestRunInstallWithIOWritesPlistAndBootstraps(t *testing.T) {
 	}
 }
 
+func TestRunInstallWithIOEscapesXMLSpecialCharacters(t *testing.T) {
+	home := t.TempDir()
+	templatePath := filepath.Join(t.TempDir(), "guardmycopy.plist")
+	template := strings.Join([]string{
+		"<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+		"<plist version=\"1.0\">",
+		"<dict>",
+		"<key>Program</key><string>__GUARDMYCOPY_BIN__</string>",
+		"<key>WorkingDirectory</key><string>__WORKDIR__</string>",
+		"<key>StandardOutPath</key><string>__LOG_DIR__/guardmycopy.out.log</string>",
+		"</dict>",
+		"</plist>",
+	}, "\n")
+	if err := os.WriteFile(templatePath, []byte(template), 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	deps := launchAgentDeps{
+		runtimeOS:    "darwin",
+		templatePath: templatePath,
+		executable: func() (string, error) {
+			return "/tmp/bin/guard&my<copy>", nil
+		},
+		cwd: func() (string, error) {
+			return "/tmp/work&dir<prod>", nil
+		},
+		homeDir: func() (string, error) {
+			return home, nil
+		},
+		uid: func() int {
+			return 501
+		},
+		runLaunchctl: func(args ...string) (string, error) {
+			return "", nil
+		},
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runInstallWithIO(nil, &stdout, &stderr, deps)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
+	}
+
+	plistPath := filepath.Join(home, "Library", "LaunchAgents", launchAgentLabel+".plist")
+	plistBytes, err := os.ReadFile(plistPath)
+	if err != nil {
+		t.Fatalf("read installed plist: %v", err)
+	}
+	plist := string(plistBytes)
+	if !strings.Contains(plist, "/tmp/bin/guard&amp;my&lt;copy&gt;") {
+		t.Fatalf("expected XML-escaped binary path in plist, got %q", plist)
+	}
+	if !strings.Contains(plist, "/tmp/work&amp;dir&lt;prod&gt;") {
+		t.Fatalf("expected XML-escaped workdir in plist, got %q", plist)
+	}
+}
+
 func TestRunInstallWithIONonDarwin(t *testing.T) {
 	deps := launchAgentDeps{
 		runtimeOS: "linux",
@@ -266,6 +324,43 @@ func TestRunStatusWithIONonDarwin(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "only supported on macOS") {
 		t.Fatalf("expected non-darwin error, got %q", stderr.String())
+	}
+}
+
+func TestLaunchAgentRunning(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{
+			name:   "running",
+			output: "pid = 123\nstate = running",
+			want:   true,
+		},
+		{
+			name:   "not running is false",
+			output: "state = not running",
+			want:   false,
+		},
+		{
+			name:   "running with suffix",
+			output: "state = running (throttled)",
+			want:   true,
+		},
+		{
+			name:   "missing state",
+			output: "pid = 123",
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := launchAgentRunning(tt.output); got != tt.want {
+				t.Fatalf("launchAgentRunning() = %t, want %t", got, tt.want)
+			}
+		})
 	}
 }
 

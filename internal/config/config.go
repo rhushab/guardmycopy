@@ -20,8 +20,8 @@ const (
 	defaultConfigDirName       = "guardmycopy"
 	defaultConfigFileName      = "config.yaml"
 	legacyDefaultConfigDirName = ".config/guardmycopy"
-	defaultConfigDirMode       = 0o755
-	defaultConfigFileMode      = 0o644
+	defaultConfigDirMode       = 0o700
+	defaultConfigFileMode      = 0o600
 	defaultConfigTemplate      = `global:
   poll_interval_ms: 500
   thresholds:
