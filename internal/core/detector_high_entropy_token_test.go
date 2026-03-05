@@ -48,6 +48,11 @@ func TestHighEntropyTokenDetectorDetect(t *testing.T) {
 			input:     "eyJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiMTIzNDU2Nzg5MCIsInJvbGUiOiJhZG1pbiJ9.ZXlKaGJHY2lPaUpJVXpJMU5pSjkuZXlKMWMyVnlYMmxrSWpvaU1USXpORFUyTnpnNU1DSXNJbk52YkdVaU9pSmhaRzFwYmlKOQ",
 			wantCount: 0,
 		},
+		{
+			name:      "skips candidates matched by common token pack",
+			input:     "ghp_abcdefghijklmnopqrstuvwxyzABCDEF1234",
+			wantCount: 0,
+		},
 	}
 
 	for _, tc := range tests {

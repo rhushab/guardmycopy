@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - `install` command support for rendering `scripts/macos/guardmycopy.plist` placeholders, writing `~/Library/LaunchAgents/com.guardmycopy.agent.plist`, creating log directory, and running `launchctl bootstrap gui/$(id -u)`
 - `status` output now includes launch-agent loaded/running state plus runtime bypass state (`snoozed-until`, `allow-once`) from persisted user state
 - `log stats --since <duration>` command for local audit analytics (top blocked/warned apps, risk-level counts, and recent block reasons) with safe skipping of malformed JSONL lines
+- Added a common token pack detector for AWS access key IDs, GitHub PATs (classic + fine-grained), Slack tokens/webhooks, and Stripe secret keys with distinct finding types and config toggles
 
 ### Changed
 - Added explicit macOS-only guardrails for launch-agent lifecycle commands with clear errors on other operating systems

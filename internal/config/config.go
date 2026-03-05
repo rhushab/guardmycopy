@@ -32,6 +32,12 @@ const (
     jwt: true
     env_secret: true
     high_entropy_token: true
+    aws_access_key_id: true
+    github_pat_classic: true
+    github_pat_fine_grained: true
+    slack_token: true
+    slack_webhook: true
+    stripe_secret_key: true
   actions:
     low: allow
     med: sanitize
@@ -119,6 +125,12 @@ func Defaults() Config {
 				core.FindingTypeJWT:              true,
 				core.FindingTypeEnvSecret:        true,
 				core.FindingTypeHighEntropyToken: true,
+				core.FindingTypeAWSAccessKeyID:   true,
+				core.FindingTypeGitHubPATClassic: true,
+				core.FindingTypeGitHubPATFine:    true,
+				core.FindingTypeSlackToken:       true,
+				core.FindingTypeSlackWebhook:     true,
+				core.FindingTypeStripeSecretKey:  true,
 			},
 			Actions: map[core.RiskLevel]Action{
 				core.RiskLevelLow:  ActionAllow,
@@ -446,6 +458,18 @@ func normalizeDetectorType(value string) (string, error) {
 		return core.FindingTypeEnvSecret, nil
 	case normalizeToken(core.FindingTypeHighEntropyToken):
 		return core.FindingTypeHighEntropyToken, nil
+	case normalizeToken(core.FindingTypeAWSAccessKeyID):
+		return core.FindingTypeAWSAccessKeyID, nil
+	case normalizeToken(core.FindingTypeGitHubPATClassic):
+		return core.FindingTypeGitHubPATClassic, nil
+	case normalizeToken(core.FindingTypeGitHubPATFine):
+		return core.FindingTypeGitHubPATFine, nil
+	case normalizeToken(core.FindingTypeSlackToken):
+		return core.FindingTypeSlackToken, nil
+	case normalizeToken(core.FindingTypeSlackWebhook):
+		return core.FindingTypeSlackWebhook, nil
+	case normalizeToken(core.FindingTypeStripeSecretKey):
+		return core.FindingTypeStripeSecretKey, nil
 	default:
 		return "", fmt.Errorf("unsupported detector %q", value)
 	}

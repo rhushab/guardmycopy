@@ -8,6 +8,12 @@ global:
     jwt: true
     env_secret: true
     high_entropy_token: true
+    aws_access_key_id: true
+    github_pat_classic: true
+    github_pat_fine_grained: true
+    slack_token: true
+    slack_webhook: true
+    stripe_secret_key: true
   actions:
     low: allow
     med: sanitize

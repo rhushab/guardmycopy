@@ -6,7 +6,7 @@ It continuously scans clipboard text for likely secrets and applies policy actio
 ## Scope
 
 What it does:
-- Detects likely sensitive text (PEM private keys, JWT-like tokens, env-style secrets, high-entropy tokens)
+- Detects likely sensitive text (PEM private keys, JWT-like tokens, env-style secrets, high-entropy tokens, and common service tokens such as AWS access key IDs, GitHub PATs, Slack tokens/webhooks, and Stripe secret keys)
 - Applies policy actions: `allow`, `warn`, `sanitize`, `block`
 - Supports per-app policy overrides (for example stricter browser/chat policies)
 - Provides optional local JSONL audit logging with hash-only clipboard representation
@@ -118,6 +118,17 @@ global:
   thresholds:
     med: 8
     high: 15
+  detector_toggles:
+    pem_private_key: true
+    jwt: true
+    env_secret: true
+    high_entropy_token: true
+    aws_access_key_id: true
+    github_pat_classic: true
+    github_pat_fine_grained: true
+    slack_token: true
+    slack_webhook: true
+    stripe_secret_key: true
   actions:
     low: allow
     med: sanitize

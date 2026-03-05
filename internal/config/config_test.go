@@ -23,6 +23,9 @@ func TestLoadDefaultsWhenDefaultFileMissing(t *testing.T) {
 	if !cfg.Global.DetectorEnabled(core.FindingTypeJWT) {
 		t.Fatal("expected jwt detector enabled by default")
 	}
+	if !cfg.Global.DetectorEnabled(core.FindingTypeStripeSecretKey) {
+		t.Fatal("expected stripe secret key detector enabled by default")
+	}
 	if cfg.Global.ActionForRisk(core.RiskLevelHigh) != ActionBlock {
 		t.Fatalf("unexpected default action: %q", cfg.Global.ActionForRisk(core.RiskLevelHigh))
 	}
@@ -39,6 +42,7 @@ func TestLoadFromYAML(t *testing.T) {
     high: 20
   detector_toggles:
     jwt: false
+    aws_access_key_id: false
   actions:
     low: allow
     med: warn
@@ -51,6 +55,7 @@ per_app:
       med: 10
     detector_toggles:
       env_secret: false
+      github_pat_classic: false
     actions:
       high: sanitize
     allowlist_patterns:
@@ -78,6 +83,9 @@ per_app:
 	if cfg.Global.DetectorEnabled(core.FindingTypeJWT) {
 		t.Fatal("expected jwt detector disabled in global policy")
 	}
+	if cfg.Global.DetectorEnabled(core.FindingTypeAWSAccessKeyID) {
+		t.Fatal("expected aws_access_key_id detector disabled in global policy")
+	}
 	if cfg.Global.ActionForRisk(core.RiskLevelMed) != ActionWarn {
 		t.Fatalf("unexpected global medium action: %q", cfg.Global.ActionForRisk(core.RiskLevelMed))
 	}
@@ -97,6 +105,9 @@ per_app:
 	}
 	if chromePolicy.DetectorEnabled(core.FindingTypeEnvSecret) {
 		t.Fatal("expected env_secret detector disabled in per-app policy")
+	}
+	if chromePolicy.DetectorEnabled(core.FindingTypeGitHubPATClassic) {
+		t.Fatal("expected github_pat_classic detector disabled in per-app policy")
 	}
 	if chromePolicy.ActionForRisk(core.RiskLevelHigh) != ActionSanitize {
 		t.Fatalf("unexpected per-app high action: %q", chromePolicy.ActionForRisk(core.RiskLevelHigh))
@@ -181,6 +192,48 @@ func TestLoadRejectsUnsupportedAction(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unsupported action") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadNormalizesCommonTokenPackDetectorToggles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "guardmycopy.yaml")
+
+	content := `global:
+  detector_toggles:
+    aws-access-key-id: false
+    github pat classic: false
+    github-pat-fine-grained: false
+    slack token: false
+    slack-webhook: false
+    stripe secret key: false
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.Global.DetectorEnabled(core.FindingTypeAWSAccessKeyID) {
+		t.Fatal("expected aws_access_key_id detector disabled after normalization")
+	}
+	if cfg.Global.DetectorEnabled(core.FindingTypeGitHubPATClassic) {
+		t.Fatal("expected github_pat_classic detector disabled after normalization")
+	}
+	if cfg.Global.DetectorEnabled(core.FindingTypeGitHubPATFine) {
+		t.Fatal("expected github_pat_fine_grained detector disabled after normalization")
+	}
+	if cfg.Global.DetectorEnabled(core.FindingTypeSlackToken) {
+		t.Fatal("expected slack_token detector disabled after normalization")
+	}
+	if cfg.Global.DetectorEnabled(core.FindingTypeSlackWebhook) {
+		t.Fatal("expected slack_webhook detector disabled after normalization")
+	}
+	if cfg.Global.DetectorEnabled(core.FindingTypeStripeSecretKey) {
+		t.Fatal("expected stripe_secret_key detector disabled after normalization")
 	}
 }
 
