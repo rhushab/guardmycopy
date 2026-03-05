@@ -51,6 +51,7 @@ type AuditLogStore interface {
 type Service struct {
 	cfg             config.Config
 	clipboard       platform.Clipboard
+	clipboardChange platform.ClipboardChangeDetector
 	engine          *core.Engine
 	redactor        core.Redactor
 	policyResolver  *PolicyResolver
@@ -95,7 +96,7 @@ func NewWithDependencies(
 		cfg.Global.Actions = cloneActions(defaults.Global.Actions)
 	}
 
-	return &Service{
+	service := &Service{
 		cfg:             cfg,
 		clipboard:       clipboard,
 		engine:          core.New(),
@@ -107,6 +108,10 @@ func NewWithDependencies(
 		lastAlertByHash: make(map[[32]byte]time.Time),
 		timeNow:         time.Now,
 	}
+	if detector, ok := clipboard.(platform.ClipboardChangeDetector); ok {
+		service.clipboardChange = detector
+	}
+	return service
 }
 
 func (s *Service) ScanCurrent() (ScanDecision, error) {
@@ -219,25 +224,50 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 
 	var lastSeenHash [32]byte
 	var lastSeenAppContext activeAppContext
+	var lastSeenChangeCount int64
 	seen := false
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timer.C:
+			currentChangeCount, hasChangeCount, err := s.currentClipboardChangeCount()
+			if err != nil {
+				return err
+			}
+
+			appContext := activeAppContext{}
+			appContextLoaded := false
+			if seen && hasChangeCount && currentChangeCount == lastSeenChangeCount {
+				appContext = s.currentActiveApp()
+				appContextLoaded = true
+				if appContext == lastSeenAppContext {
+					timer.Reset(polling.OnClipboardUnchanged())
+					continue
+				}
+			}
+
 			current, err := s.clipboard.ReadText()
 			if err != nil {
 				return fmt.Errorf("read clipboard: %w", err)
 			}
 			currentHash := hashText(current)
-			appContext := s.currentActiveApp()
+			if !appContextLoaded {
+				appContext = s.currentActiveApp()
+			}
 			if seen && currentHash == lastSeenHash && appContext == lastSeenAppContext {
+				if hasChangeCount {
+					lastSeenChangeCount = currentChangeCount
+				}
 				timer.Reset(polling.OnClipboardUnchanged())
 				continue
 			}
 			seen = true
 			lastSeenHash = currentHash
 			lastSeenAppContext = appContext
+			if hasChangeCount {
+				lastSeenChangeCount = currentChangeCount
+			}
 			nextInterval := polling.OnClipboardChanged()
 
 			bypass, bypassReason, err := s.shouldBypassEnforcement()
@@ -281,6 +311,13 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 			})
 			if changed {
 				lastSeenHash = hashText(nextValue)
+				currentChangeCount, hasChangeCount, err = s.currentClipboardChangeCount()
+				if err != nil {
+					return err
+				}
+				if hasChangeCount {
+					lastSeenChangeCount = currentChangeCount
+				}
 			}
 			timer.Reset(nextInterval)
 		}
@@ -388,6 +425,18 @@ func (s *Service) currentActiveApp() activeAppContext {
 		return activeAppContext{}
 	}
 	return activeAppContext{name: activeAppName, bundleID: activeAppBundleID}
+}
+
+func (s *Service) currentClipboardChangeCount() (count int64, ok bool, err error) {
+	if s.clipboardChange == nil {
+		return 0, false, nil
+	}
+
+	count, err = s.clipboardChange.ChangeCount()
+	if err != nil {
+		return 0, true, fmt.Errorf("read clipboard change count: %w", err)
+	}
+	return count, true, nil
 }
 
 func (s *Service) applyAction(

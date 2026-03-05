@@ -18,11 +18,13 @@ type mockClipboard struct {
 	value    string
 	readErr  error
 	writeErr error
+	reads    int
 	writes   int
 	readHook func()
 }
 
 func (m *mockClipboard) ReadText() (string, error) {
+	m.reads++
 	if m.readHook != nil {
 		m.readHook()
 	}
@@ -39,6 +41,33 @@ func (m *mockClipboard) WriteText(value string) error {
 	m.value = value
 	m.writes++
 	return nil
+}
+
+type mockClipboardWithChangeDetector struct {
+	*mockClipboard
+	changeCounts     []int64
+	changeCountErr   error
+	changeCountCalls int
+	changeCountHook  func(call int)
+}
+
+func (m *mockClipboardWithChangeDetector) ChangeCount() (int64, error) {
+	m.changeCountCalls++
+	if m.changeCountHook != nil {
+		m.changeCountHook(m.changeCountCalls)
+	}
+	if m.changeCountErr != nil {
+		return 0, m.changeCountErr
+	}
+	if len(m.changeCounts) == 0 {
+		return 0, nil
+	}
+
+	index := m.changeCountCalls - 1
+	if index >= len(m.changeCounts) {
+		index = len(m.changeCounts) - 1
+	}
+	return m.changeCounts[index], nil
 }
 
 type mockNotifier struct {

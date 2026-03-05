@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Test coverage for change-count-driven clipboard polling and the Darwin native pasteboard abstraction without relying on flaky end-to-end macOS clipboard behavior
+
+### Changed
+- macOS clipboard access now uses a native AppKit pasteboard implementation with `changeCount` polling, avoiding steady-state `pbpaste` subprocesses and reducing the clipboard enforcement race window
+
 ## [1.0.0-rc2] - 2026-03-05
 
 ### Added

@@ -42,7 +42,7 @@ Out of scope:
 ## Platform and Permissions
 
 - Supported OS: **macOS only** (`darwin`)
-- Uses `pbpaste` / `pbcopy` for clipboard access
+- Uses native AppKit pasteboard reads/writes plus `changeCount` polling for lower-latency clipboard monitoring
 - Uses `osascript` + `System Events` for foreground app name, bundle ID, and notifications
 - You may need Accessibility permission for your terminal/app:
   - `System Settings -> Privacy & Security -> Accessibility`
@@ -76,6 +76,7 @@ go build -o ./guardmycopy ./cmd/guardmycopy
 Notes:
 - Default poll interval: `500ms`
 - Minimum poll interval: `100ms` (lower values are clamped)
+- Clipboard polling checks the native pasteboard change counter before doing a full text read when possible, reducing steady-state monitoring overhead
 - Adaptive idle backoff: after `4` consecutive polls with no clipboard or foreground-app change, the run loop doubles the interval stepwise up to `2s` while idle, then resets immediately to the configured base interval on the next clipboard or foreground-app change
 
 ### Manage macOS launch agent

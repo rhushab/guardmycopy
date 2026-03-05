@@ -147,6 +147,113 @@ func TestRunUsesBundleIDOverrideBeforePerApp(t *testing.T) {
 	}
 }
 
+func TestRunSkipsClipboardReadWhenChangeCountAndAppAreUnchanged(t *testing.T) {
+	clip := &mockClipboardWithChangeDetector{
+		mockClipboard: &mockClipboard{value: "hello"},
+		changeCounts:  []int64{3, 3},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	clip.changeCountHook = func(call int) {
+		if call == 2 {
+			cancel()
+			clip.changeCountHook = nil
+		}
+	}
+
+	svc := New(config.Defaults(), clip)
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if clip.reads != 1 {
+		t.Fatalf("expected one clipboard read, got %d", clip.reads)
+	}
+	if clip.changeCountCalls != 2 {
+		t.Fatalf("expected two change count polls, got %d", clip.changeCountCalls)
+	}
+}
+
+func TestRunReevaluatesOnForegroundAppChangeEvenWhenChangeCountIsUnchanged(t *testing.T) {
+	cfg := config.Defaults()
+
+	clip := &mockClipboardWithChangeDetector{
+		mockClipboard: &mockClipboard{
+			value: "prefix\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nsuffix",
+		},
+		changeCounts: []int64{5, 5},
+	}
+	currentApp := "iTerm2"
+	foregroundCalls := 0
+	foreground := &mockForegroundApp{
+		activeApp: func() (string, string, error) {
+			foregroundCalls++
+			if foregroundCalls == 2 {
+				currentApp = "Slack"
+			}
+			return currentApp, "", nil
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	clip.readHook = func() {
+		if clip.reads == 2 {
+			cancel()
+			clip.readHook = nil
+		}
+	}
+
+	svc := NewWithDependencies(cfg, clip, foreground, nil)
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if clip.reads != 2 {
+		t.Fatalf("expected two clipboard reads across app change, got %d", clip.reads)
+	}
+}
+
+func TestRunRefreshesChangeCountAfterClipboardWrite(t *testing.T) {
+	clip := &mockClipboardWithChangeDetector{
+		mockClipboard: &mockClipboard{
+			value: "prefix\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nsuffix",
+		},
+		changeCounts: []int64{7, 8, 8},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	clip.changeCountHook = func(call int) {
+		if call == 3 {
+			cancel()
+			clip.changeCountHook = nil
+		}
+	}
+
+	svc := New(config.Defaults(), clip)
+
+	err := svc.Run(ctx, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if clip.writes != 1 {
+		t.Fatalf("expected one clipboard write, got %d", clip.writes)
+	}
+	if clip.reads != 1 {
+		t.Fatalf("expected no extra clipboard read after service write, got %d", clip.reads)
+	}
+	if clip.value != blockedClipboardValue {
+		t.Fatalf("expected blocked clipboard marker, got %q", clip.value)
+	}
+}
+
 func TestRunReevaluatesOnUnchangedClipboardWhenForegroundAppChanges(t *testing.T) {
 	cfg := config.Defaults()
 
