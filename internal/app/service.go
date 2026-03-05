@@ -251,7 +251,9 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 		case <-timer.C:
 			currentChangeCount, hasChangeCount, err := s.currentClipboardChangeCount()
 			if err != nil {
-				return err
+				s.warnRuntime("clipboard-change-count", "clipboard change count unavailable; falling back to full clipboard reads: %v", err)
+				currentChangeCount = 0
+				hasChangeCount = false
 			}
 			state, err := s.loadRuntimeState()
 			if err != nil {
@@ -274,7 +276,9 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 
 			current, err := s.clipboard.ReadText()
 			if err != nil {
-				return fmt.Errorf("read clipboard: %w", err)
+				s.warnRuntime("clipboard-read", "clipboard read failed; retrying: %v", err)
+				timer.Reset(polling.OnClipboardChanged())
+				continue
 			}
 			currentHash := hashText(current)
 			if !appResolutionLoaded {
@@ -334,7 +338,8 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 				lastSeenHash = hashText(nextValue)
 				currentChangeCount, hasChangeCount, err = s.currentClipboardChangeCount()
 				if err != nil {
-					return err
+					s.warnRuntime("clipboard-change-count", "clipboard change count unavailable after clipboard update; continuing without fast-path optimization: %v", err)
+					hasChangeCount = false
 				}
 				if hasChangeCount {
 					lastSeenChangeCount = currentChangeCount
