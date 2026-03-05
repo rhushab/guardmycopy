@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.0.0-rc2] - 2026-03-05
+
 ### Added
 - CLI launch-agent lifecycle commands: `install`, `uninstall`, and `status`
 - `install` command support for rendering an embedded launch-agent plist template, writing `~/Library/LaunchAgents/com.guardmycopy.agent.plist`, creating log directory, and running `launchctl bootstrap gui/$(id -u)`
@@ -16,7 +18,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - Added explicit macOS-only guardrails for launch-agent lifecycle commands with clear errors on other operating systems
 - Service run loop now uses adaptive idle polling backoff: unchanged clipboard reads gradually increase poll interval (capped at 2s) and reset immediately to the configured base interval when clipboard content changes
-- CLI version now reports `1.0.0-rc2-dev` while unreleased changes are in progress
+- CLI version now reports `1.0.0-rc2`
 
 ## [1.0.0-rc1] - 2026-03-04
 
@@ -83,6 +85,8 @@ All notable changes to this project will be documented in this file.
 - Initial project scaffold
 - PEM private key detection
 
+[Unreleased]: https://github.com/rhushab/guardmycopy/compare/v1.0.0-rc2...HEAD
+[1.0.0-rc2]: https://github.com/rhushab/guardmycopy/releases/tag/v1.0.0-rc2
 [1.0.0-rc1]: https://github.com/rhushab/guardmycopy/releases/tag/v1.0.0-rc1
 [0.8]: https://github.com/rhushab/guardmycopy/releases/tag/v0.8
 [0.7]: https://github.com/rhushab/guardmycopy/releases/tag/v0.7

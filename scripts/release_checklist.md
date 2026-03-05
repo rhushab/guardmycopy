@@ -43,8 +43,8 @@ Confirm no raw clipboard content appears in audit logs.
 ## 4) Tag and Release Candidate
 
 ```bash
-git tag -a v1.0.0-rc1 -m "v1.0.0-rc1"
-git push origin v1.0.0-rc1
+git tag -a v1.0.0-rc2 -m "v1.0.0-rc2"
+git push origin v1.0.0-rc2
 ```
 
 ## 5) GitHub Release Notes
@@ -54,6 +54,11 @@ Include:
 - Breaking or behavior changes
 - Manual upgrade/config notes
 - Known limitations
+
+After pushing the tag, update `Formula/guardmycopy.rb` on `main`:
+- Set `url` to `.../refs/tags/<tag>.tar.gz`
+- Set `version` to the release version
+- Set `sha256` to the downloaded tarball checksum (`curl -L <url> | shasum -a 256`)
 
 ## 6) Post-release
 

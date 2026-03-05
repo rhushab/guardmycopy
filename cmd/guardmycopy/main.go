@@ -23,7 +23,7 @@ import (
 	"github.com/rhushab/guardmycopy/internal/userstate"
 )
 
-const version = "1.0.0-rc2-dev"
+const version = "1.0.0-rc2"
 
 func main() {
 	os.Exit(run(os.Args[1:]))

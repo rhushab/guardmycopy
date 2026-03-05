@@ -108,7 +108,7 @@ brew install rhushab/guardmycopy/guardmycopy
 ```
 
 Notes:
-- The tap formula tracks the `main` branch and builds from source.
+- The tap formula tracks immutable release tags and builds from source.
 - `go` is installed automatically as a build dependency.
 
 ## Install (manual local)
