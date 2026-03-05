@@ -67,23 +67,24 @@ type AuditLogStore interface {
 }
 
 type Service struct {
-	cfg              config.Config
-	clipboard        platform.Clipboard
-	clipboardChange  platform.ClipboardChangeDetector
-	engine           *core.Engine
-	redactor         core.Redactor
-	policyResolver   *PolicyResolver
-	foregroundApp    platform.ForegroundApp
-	notifier         platform.Notifier
-	alertDebounce    time.Duration
-	lastAlertByHash  map[[32]byte]time.Time
-	timeNow          func() time.Time
-	stateStore       RuntimeStateStore
-	auditLogStore    AuditLogStore
-	verboseOutput    io.Writer
-	warningOutput    io.Writer
-	warningDebounce  time.Duration
-	lastWarningByKey map[string]time.Time
+	cfg                      config.Config
+	clipboard                platform.Clipboard
+	clipboardChange          platform.ClipboardChangeDetector
+	engine                   *core.Engine
+	redactor                 core.Redactor
+	policyResolver           *PolicyResolver
+	foregroundApp            platform.ForegroundApp
+	notifier                 platform.Notifier
+	alertDebounce            time.Duration
+	lastAlertByHash          map[[32]byte]time.Time
+	timeNow                  func() time.Time
+	stateStore               RuntimeStateStore
+	auditLogStore            AuditLogStore
+	verboseOutput            io.Writer
+	warningOutput            io.Writer
+	warningDebounce          time.Duration
+	lastWarningByKey         map[string]time.Time
+	pendingAllowOnceConsumed bool
 }
 
 func New(cfg config.Config, clipboard platform.Clipboard) *Service {
@@ -255,10 +256,7 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 				currentChangeCount = 0
 				hasChangeCount = false
 			}
-			state, err := s.loadRuntimeState()
-			if err != nil {
-				return err
-			}
+			state := s.loadRuntimeStateForRun()
 			snoozeActive := state.SnoozeActive(s.timeNow())
 
 			appResolution := activeAppResolution{
@@ -294,6 +292,11 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 				timer.Reset(polling.OnClipboardUnchanged())
 				continue
 			}
+			previousSeen := seen
+			previousLastSeenHash := lastSeenHash
+			previousLastSeenAppContext := lastSeenAppContext
+			previousLastSeenChangeCount := lastSeenChangeCount
+			previousLastSeenSnoozeActive := lastSeenSnoozeActive
 			seen = true
 			lastSeenHash = currentHash
 			lastSeenAppContext = appResolution.context
@@ -303,10 +306,7 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 			}
 			nextInterval := polling.OnClipboardChanged()
 
-			bypass, bypassReason, err := s.shouldBypassEnforcementWithState(state, clipboardOrAppChanged)
-			if err != nil {
-				return err
-			}
+			bypass, bypassReason := s.shouldBypassEnforcementForRun(state, clipboardOrAppChanged)
 			if bypass {
 				s.logVerbose("action=allow reason=%s", bypassReason)
 				timer.Reset(nextInterval)
@@ -331,7 +331,14 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) error {
 
 			changed, nextValue, err := s.applyAction(decision, current, result.SanitizedText, currentHash)
 			if err != nil {
-				return err
+				seen = previousSeen
+				lastSeenHash = previousLastSeenHash
+				lastSeenAppContext = previousLastSeenAppContext
+				lastSeenChangeCount = previousLastSeenChangeCount
+				lastSeenSnoozeActive = previousLastSeenSnoozeActive
+				s.warnRuntime("clipboard-write", "clipboard write failed; keeping enforcement active and retrying: %v", err)
+				timer.Reset(polling.OnClipboardChanged())
+				continue
 			}
 			s.writeAuditLog(s.newScanDecision(decision, result, currentHash))
 			if changed {
@@ -643,12 +650,58 @@ func (s *Service) loadRuntimeState() (userstate.State, error) {
 	return state, nil
 }
 
+func (s *Service) loadRuntimeStateForRun() userstate.State {
+	state, err := s.loadRuntimeState()
+	loaded := err == nil
+	if err != nil {
+		s.warnRuntime(
+			"runtime-state-load",
+			"runtime state unavailable; continuing without persisted snooze or allow-once state: %v",
+			err,
+		)
+		state = userstate.State{}
+	}
+
+	if !s.pendingAllowOnceConsumed {
+		return state
+	}
+	if !loaded {
+		return state
+	}
+	if !state.AllowOnce {
+		s.pendingAllowOnceConsumed = false
+		return state
+	}
+
+	state.AllowOnce = false
+	if err := s.saveRuntimeState(state); err != nil {
+		s.warnRuntime("runtime-state-save", "runtime state save failed; continuing with enforcement: %v", err)
+		return state
+	}
+
+	s.pendingAllowOnceConsumed = false
+	return state
+}
+
 func (s *Service) shouldBypassEnforcement() (bool, string, error) {
 	state, err := s.loadRuntimeState()
 	if err != nil {
 		return false, "", err
 	}
 	return s.shouldBypassEnforcementWithState(state, true)
+}
+
+func (s *Service) shouldBypassEnforcementForRun(
+	state userstate.State,
+	allowOnceEligible bool,
+) (bool, string) {
+	bypass, reason, err := s.shouldBypassEnforcementWithState(state, allowOnceEligible)
+	if err == nil {
+		return bypass, reason
+	}
+
+	s.warnRuntime("runtime-state-save", "runtime state save failed; continuing with enforcement: %v", err)
+	return false, ""
 }
 
 func (s *Service) shouldBypassEnforcementWithState(
@@ -673,19 +726,28 @@ func (s *Service) shouldBypassEnforcementWithState(
 	if state.AllowOnce && allowOnceEligible {
 		state.AllowOnce = false
 		dirty = true
-		if err := s.stateStore.Save(state); err != nil {
+		if err := s.saveRuntimeState(state); err != nil {
+			s.pendingAllowOnceConsumed = true
 			return false, "", fmt.Errorf("save runtime state: %w", err)
 		}
+		s.pendingAllowOnceConsumed = false
 		return true, "allow-once consumed", nil
 	}
 
 	if dirty {
-		if err := s.stateStore.Save(state); err != nil {
+		if err := s.saveRuntimeState(state); err != nil {
 			return false, "", fmt.Errorf("save runtime state: %w", err)
 		}
 	}
 
 	return false, "", nil
+}
+
+func (s *Service) saveRuntimeState(state userstate.State) error {
+	if s.stateStore == nil {
+		return nil
+	}
+	return s.stateStore.Save(state)
 }
 
 func (s *Service) logVerbose(format string, args ...any) {
