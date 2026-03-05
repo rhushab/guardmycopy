@@ -456,6 +456,10 @@ func runLog(args []string) int {
 }
 
 func runLogWithIO(args []string, stdout, stderr io.Writer, logPath string) int {
+	if len(args) > 0 && args[0] == "stats" {
+		return runLogStatsWithIO(args[1:], stdout, stderr, logPath, time.Now)
+	}
+
 	fs := flag.NewFlagSet("log", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { printLogUsage(fs.Output()) }
@@ -567,7 +571,7 @@ Commands:
   status      print launch agent and runtime bypass status
   snooze      disable enforcement for a duration (for example: 5m)
   allow-once  bypass enforcement for the next clipboard event
-  log         print recent audit log entries
+  log         print recent audit log entries or stats
   config      manage guardmycopy config files
   version     print CLI version
 
@@ -624,9 +628,13 @@ func printAllowOnceUsage(w io.Writer) {
 func printLogUsage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, `Usage:
   guardmycopy log [--tail N]
+  guardmycopy log stats --since duration
 
 Options:
-  --tail N  print the last N audit log entries (default: 50)`)
+  --tail N  print the last N audit log entries (default: 50)
+
+Stats Options:
+  --since duration  required window (supports d/h/m, example: 7d, 12h, 30m)`)
 }
 
 func printConfigUsage(w io.Writer) {

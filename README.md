@@ -167,7 +167,10 @@ printf '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n' | pbcopy
 ```bash
 ./guardmycopy run --audit-log
 ./guardmycopy log --tail 20
+./guardmycopy log stats --since 7d
 ```
+
+`log stats --since` requires a duration window and supports `d`, `h`, and `m` units.
 
 Expected audit location:
 - `$(os.UserConfigDir)/guardmycopy/audit.jsonl`
